@@ -1,0 +1,84 @@
+  ** log file mt_slip5.log **                                                                                                     
+ * log-file WAVE.LOG opened  20250908  110942.00
+>                                                                                                                                 
+>** 3D Grid size and dimentions                                                                                                   
+>gr 510 100 510 20 20 20                                                                                                          
+>                                                                                                                                 
+>** Material properties                                                                                                           
+>prop mat=1 cp=5000 cs=2700 dens=2500                                                                                             
+>prop mat=2 cp=2000 cs=1000 dens=2000                                                                                             
+>prop mat=3 cp=3000 cs=1500 dens=2200                                                                                             
+>prop mat=4 cp=3500 cs=1600 dens=2200                                                                                             
+>prop mat=5 cp=4000 cs=2000 dens=2400                                                                                             
+>                                                                                                                                 
+>mat 2 i=10,500 j=80,99 k=10,500                                                                                                  
+>mat 3 i=10,500 j=60,80 k=10,500                                                                                                  
+>mat 3 i=10,300 j=50,60 k=10,500                                                                                                  
+>mat 4 i=300,500 j=50,60 k=10,500                                                                                                 
+>mat 4 i=10,500 j=30,50 k=10,500                                                                                                  
+>                                                                                                                                 
+>                                                                                                                                 
+>so sup ty=s11 wa=tab s11.tbl am=1e-10 pe=0.1 ts1=0 be=-1 en=1 i=250 j=50 k=250                                                   
+>so sup ty=s22 wa=tab s22.tbl am=1e-10 pe=0.1 ts1=0 be=-1 en=1 i=250 j=50 k=250                                                   
+>so sup ty=s33 wa=tab s33.tbl am=1e-10 pe=0.1 ts1=0 be=-1 en=1 i=250 j=50 k=250                                                   
+>so sup ty=s12 wa=tab s12.tbl am=1e-10 pe=0.1 ts1=0 be=-1 en=1 i=250 j=50 k=250                                                   
+>so sup ty=s13 wa=tab s13.tbl am=1e-10 pe=0.1 ts1=0 be=-1 en=1 i=250 j=50 k=250                                                   
+>so sup ty=s23 wa=tab s23.tbl am=1e-10 pe=0.1 ts1=0 be=-1 en=1 i=250 j=50 k=250                                                   
+>                                                                                                                                 
+>                                                                                                                                 
+>damp off                                                                                                                         
+  ** DAMPING OFF **                                                                                                               
+>                                                                                                                                 
+>** Displacement plots                                                                                                            
+>his mx_vel                                                                                                                       
+** time sample for point histories =    1 cycles **                                                                               
+>                                                                                                                                 
+>                                                                                                                                 
+>** History recordings                                                                                                            
+>his s11(100,85,100) s22(100,85,100) s33(100,85,100)                                                                              
+>his s11(200,85,100) s22(200,85,100) s33(200,85,100)                                                                              
+>his s11(300,85,100) s22(300,85,100) s33(300,85,100)                                                                              
+>his s11(400,85,100) s22(400,85,100) s33(400,85,100)                                                                              
+>his s11(500,85,100) s22(500,85,100) s33(500,85,100)                                                                              
+>                                                                                                                                 
+>his s11(100,85,200) s22(100,85,200) s33(100,85,200)                                                                              
+>his s11(200,85,200) s22(200,85,200) s33(200,85,200)                                                                              
+>his s11(300,85,200) s22(300,85,200) s33(300,85,200)                                                                              
+>his s11(400,85,200) s22(400,85,200) s33(400,85,200)                                                                              
+>his s11(500,85,200) s22(500,85,200) s33(500,85,200)                                                                              
+>                                                                                                                                 
+>his s11(100,85,300) s22(100,85,300) s33(100,85,300)                                                                              
+>his s11(200,85,300) s22(200,85,300) s33(200,85,300)                                                                              
+>his s11(300,85,300) s22(300,85,300) s33(300,85,300)                                                                              
+>his s11(400,85,300) s22(400,85,300) s33(400,85,300)                                                                              
+>his s11(500,85,300) s22(500,85,300) s33(500,85,300)                                                                              
+>                                                                                                                                 
+>his s11(100,85,400) s22(100,85,400) s33(100,85,400)                                                                              
+>his s11(200,85,400) s22(200,85,400) s33(200,85,400)                                                                              
+>his s11(300,85,400) s22(300,85,400) s33(300,85,400)                                                                              
+>his s11(400,85,400) s22(400,85,400) s33(400,85,400)                                                                              
+>his s11(500,85,400) s22(500,85,400) s33(500,85,400)                                                                              
+>                                                                                                                                 
+>his s11(100,85,500) s22(100,85,500) s33(100,85,500)                                                                              
+>his s11(200,85,500) s22(200,85,500) s33(200,85,500)                                                                              
+>his s11(300,85,500) s22(300,85,500) s33(300,85,500)                                                                              
+>his s11(400,85,500) s22(400,85,500) s33(400,85,500)                                                                              
+>his s11(500,85,500) s22(500,85,500) s33(500,85,500)                                                                              
+>                                                                                                                                 
+>                                                                                                                                 
+>pl snap vabs rep=100 i=1,510 j=50 k=1,510                                                                                        
+** snapshot repeat frequency =  100 cycles **                                                                                     
+>pl snap s11 rep=100 i=1,510 j=50 k=1,510                                                                                         
+** snapshot repeat frequency =  100 cycles **                                                                                     
+>pl snap s22 rep=100  k=250                                                                                                       
+** snapshot repeat frequency =  100 cycles **                                                                                     
+>pl snap s33 rep=100  i=250                                                                                                       
+** snapshot repeat frequency =  100 cycles **                                                                                     
+>                                                                                                                                 
+>cy 4000                                                                                                                          
+        (Min.) timestep =  1.80000E-03                                                                                            
+  ** Cycle  4000, time = 7.20014E+00 **                                                                                           
+>pl his all                                                                                                                       
+>                                                                                                                                 
+>set log off                                                                                                                      
+ * log-file recording stopped  20250908  120023.31
