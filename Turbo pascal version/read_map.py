@@ -2,6 +2,7 @@ import struct
 from dataclasses import dataclass
 from typing import Dict, List, Any
 import csv
+import os
 
 @dataclass
 class SnapMapRec:
@@ -227,7 +228,7 @@ class WAVEData:
         self.base_filename = base_filename
         try:
             # Open the .map file which is the index for all other files
-            self.map_file = open(f'{base_filename}.MAP', 'rb')
+            self.map_file = open(f'{base_filename}.map', 'rb')
             
             # Check for the existence of other files and set flags
             try:
@@ -657,7 +658,14 @@ class WAVEData:
 if __name__ == '__main__':
     # Example usage
     data_reader = WAVEData()
-    filename = "psol2d"  # Replace with your actual file name (without extension)
+    #filename = "psol2d"  # Replace with your actual file name (without extension)
+
+    # get the parent directory of the current file
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    parent_dir = os.path.dirname(current_dir)
+    # filename is parent_dir/Waveplot_exe/mt_slip5.map
+    filename = os.path.join(parent_dir, "Waveplot_exe", "mt_slip5")
+    print(f"Filename: {filename}")
     
     if data_reader.di_file_init(filename):
         data_reader.di_read_map()

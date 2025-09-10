@@ -1,1 +1,26 @@
+# venv directory
 waveplot_venv/
+
+logs/
+
+
+# Common gitignore files
+*.log
+*.env
+*.env.local
+.env
+.envrc
+env/
+venv/
+
+# Byte compiled files
+__pycache__/
+
+# Distribution / Packaging
+.Python
+build/
+dist/
+lib/
+lib64/
+
+
