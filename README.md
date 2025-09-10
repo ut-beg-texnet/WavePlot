@@ -17,7 +17,7 @@ pip install numpy pandas matplotlib scipy tkinter
 
 1. Clone the repository:
 ```bash
-git clone <repository-url>
+git clone https://github.austin.utexas.edu/texnet/WavePlot.git
 cd WavePlot
 ```
 
