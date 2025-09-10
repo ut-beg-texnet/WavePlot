@@ -38,7 +38,7 @@ python Manolis_pythhon_version/WaveViewer_stable.py
 
 #### Command Line Options
 
-- `--debug`: Enable debug logging mode for detailed troubleshooting
+- `--debug`: Enable debug logging mode for detailed troubleshooting (automatically logs to a 'logs' directory)
 
 ```bash
 python Manolis_pythhon_version/WaveViewer_stable.py --debug
