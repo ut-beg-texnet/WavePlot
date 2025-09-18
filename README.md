@@ -1,71 +1,41 @@
 # WavePlot
 
-A Python-based waveform plotting and analysis tool for scientific simulation data, originally ported from Turbo Pascal. WavePlot provides a GUI interface for visualizing waveform data from history files (.hst), model files (.m), and map files (.map).
+WavePlot is a Python-based waveform plotting and analysis tool for WAVE simulation outputs, originally ported from Turbo Pascal. The current GUI implementation lives in the `waveplot_python` directory and pairs Tkinter with Matplotlib to parse `.map` files along with their corresponding history, snapshot, and dump files.
 
 ## Installation
 
 ### Prerequisites
 
 - Python 3.7 or higher
-- Required Python packages (install via pip):
+- pip (bundled with Python)
+- The dependencies listed in `requirements.txt` (`tkinter` ships with Python on Windows/macOS; Linux distributions may package it separately)
 
-```bash
-pip install numpy pandas matplotlib scipy tkinter
+### Quick setup
+
 ```
-
-### Setup
-
-1. Clone the repository:
-```bash
-git clone https://github.austin.utexas.edu/texnet/WavePlot.git
-cd WavePlot
-```
-
-2. Install dependencies:
-```bash
+python -m venv .venv
+.\.venv\Scripts\activate  # Windows
+source .venv/bin/activate  # macOS / Linux
 pip install -r requirements.txt
 ```
 
-## Usage
+## Launch the WavePlot GUI
 
-### WaveViewer GUI Application
+Run the new interface from the repository root:
 
-Launch the main GUI application:
-
-```bash
-python Manolis_pythhon_version/WaveViewer_stable.py
+```
+python -m waveplot_python.main [path\to\project.map]
 ```
 
-#### Command Line Options
-
-- `--debug`: Enable debug logging mode for detailed troubleshooting (automatically logs to a 'logs' directory)
-
-```bash
-python Manolis_pythhon_version/WaveViewer_stable.py --debug
-```
+Passing a `.map` path preloads the project; omit it to open files later via `File -> Open .map...`. You can also launch with `python waveplot_python/main.py`.
 
 
-### Map File Reader Utility
+## Additional documentation
 
-The `read_map_file.py` utility provides command-line access to .map file analysis:
+I created `waveplot_python/software_architecture.md` for more context regarding the data flow.
 
-#### Basic Usage
+## Legacy assets
 
-```bash
-# Print summary to console
-python python_code/read_map_file.py --map-file path/to/your/file.map
+Older references remain in the repository:
 
-# Save summary to file
-python python_code/read_map_file.py --map-file path/to/your/file.map -o summary.txt
-```
-
-#### Example Commands
-
-```bash
-# Quick check of .map file contents
-python python_code/read_map_file.py --map-file Waveplot_exe/mt_slip5.map
-
-# Save summary to a text file
-python python_code/read_map_file.py --map-file Waveplot_exe/mt_slip5.map -o mt_slip5_analysis.txt
-```
-
+- `Turbo pascal version/` contains the original Pascal source.

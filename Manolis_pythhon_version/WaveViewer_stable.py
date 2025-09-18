@@ -95,6 +95,7 @@ try:
         try_resolve_hst_from_map,
         try_resolve_m_from_map,
         map_to_base_filename,
+        history_labels_from_map,
     )
     logger.info("Successfully imported map file utilities")
 except Exception as e:
@@ -226,6 +227,12 @@ class WFile:
             
             self.logger.info("GUI initialization completed successfully")
             
+            # Build notebook-based workspace (selection + plot area)
+            try:
+                self.build_notebook()
+            except Exception as e:
+                self.logger.warning(f"Failed to build notebook UI (continuing with classic menus): {e}")
+            
         except Exception as e:
             self.logger.error(f"Failed to initialize GUI: {e}")
             messagebox.showerror("Initialization Error", f"Failed to initialize GUI: {e}")
@@ -240,6 +247,240 @@ class WFile:
         except Exception as e:
             self.logger.error(f"Failed to update status: {e}")
         
+    # ---------- Plot embedding helpers ----------
+    def _ensure_top_plot_container(self):
+        """Ensure a valid Toplevel container exists for plots when Notebook area is absent."""
+        try:
+            if not hasattr(self, 'top') or (not self.top.winfo_exists()):
+                self.top = Toplevel(window)
+                self.top.title("Waveform Viewer")
+                self._top_plot_container = Frame(self.top)
+                self._top_plot_container.pack(fill=BOTH, expand=True)
+            else:
+                # Reuse existing container or create it if missing
+                if not hasattr(self, '_top_plot_container') or (not self._top_plot_container.winfo_exists()):
+                    self._top_plot_container = Frame(self.top)
+                    self._top_plot_container.pack(fill=BOTH, expand=True)
+        except Exception as e:
+            self.logger.error(f"Failed ensuring top plot container: {e}")
+
+    def _embed_figure_safe(self, fig):
+        """Embed figure either in Notebook's plot area (preferred) or in a safe Toplevel."""
+        try:
+            if hasattr(self, 'plot_area') and self.plot_area.winfo_exists():
+                # Use notebook embedding
+                return self._embed_figure(fig)
+        except Exception:
+            pass
+        # Fallback to a resilient toplevel container
+        self._ensure_top_plot_container()
+        try:
+            # Clear previous widgets
+            for w in self._top_plot_container.winfo_children():
+                w.destroy()
+            canvas = FigureCanvasTkAgg(fig, master=self._top_plot_container)
+            canvas.draw()
+            toolbar = NavigationToolbar2Tk(canvas, self._top_plot_container)
+            toolbar.pack()
+            toolbar.update()
+            canvas.get_tk_widget().pack(side='top', fill='both', expand=True)
+        except Exception as e:
+            self.logger.error(f"Failed to embed figure: {e}")
+            messagebox.showerror('Plot Error', f'Failed to render plot: {e}')
+
+    # ---------- Notebook-based UI ----------
+    def build_notebook(self):
+        # Create notebook and tabs
+        self.nb = ttk.Notebook(self.main_container)
+        self.nb.pack(fill=BOTH, expand=True, pady=10)
+
+        self.tab_wave = Frame(self.nb, bg='#f8f8f8')
+        self.nb.add(self.tab_wave, text='Waveforms')
+
+        # Left selection panel
+        left = Frame(self.tab_wave, bg='#f8f8f8')
+        left.pack(side=LEFT, fill=Y, padx=10, pady=10)
+
+        Label(left, text='Search', bg='#f8f8f8').pack(anchor='w')
+        self.search_var = tk.StringVar()
+        self.search_entry = ttk.Entry(left, textvariable=self.search_var, width=28)
+        self.search_entry.pack(anchor='w', pady=(0,6))
+        self.search_entry.bind('<KeyRelease>', lambda e: self.refresh_waveform_list())
+
+        list_frame = Frame(left, bg='#f8f8f8')
+        list_frame.pack(fill=Y, expand=True)
+        self.wf_list = tk.Listbox(list_frame, selectmode=EXTENDED, width=28, height=18)
+        self.wf_list.pack(side=LEFT, fill=Y)
+        sb = ttk.Scrollbar(list_frame, orient=VERTICAL, command=self.wf_list.yview)
+        sb.pack(side=RIGHT, fill=Y)
+        self.wf_list.configure(yscrollcommand=sb.set)
+
+        btns = Frame(left, bg='#f8f8f8')
+        btns.pack(fill=X, pady=(8,0))
+        ttk.Button(btns, text='Select All', command=lambda: self.wf_list.select_set(0, END)).grid(row=0, column=0, padx=2)
+        ttk.Button(btns, text='Clear', command=lambda: self.wf_list.select_clear(0, END)).grid(row=0, column=1, padx=2)
+
+        actions = Frame(left, bg='#f8f8f8')
+        actions.pack(fill=X, pady=(10,0))
+        ttk.Button(actions, text='Plot Time', command=self.plot_time_tab).grid(row=0, column=0, padx=4, pady=2, sticky='ew')
+        ttk.Button(actions, text='FFT', command=self.plot_fft_tab).grid(row=0, column=1, padx=4, pady=2, sticky='ew')
+        ttk.Button(actions, text='Low-pass', command=self.plot_lowpass_tab).grid(row=0, column=2, padx=4, pady=2, sticky='ew')
+
+        # Low-pass controls
+        lp_frame = Frame(left, bg='#f8f8f8')
+        lp_frame.pack(fill=X, pady=(6,0))
+        Label(lp_frame, text='Order', bg='#f8f8f8').grid(row=0, column=0, sticky='w')
+        self.lp_order_var = tk.StringVar(value='4')
+        ttk.Entry(lp_frame, textvariable=self.lp_order_var, width=6).grid(row=0, column=1, padx=(6,12))
+        Label(lp_frame, text='Cutoff Hz (blank=auto)', bg='#f8f8f8').grid(row=0, column=2, sticky='w')
+        self.lp_cutoff_var = tk.StringVar(value='')
+        ttk.Entry(lp_frame, textvariable=self.lp_cutoff_var, width=10).grid(row=0, column=3, padx=(6,0))
+
+        # Right plotting area
+        self.plot_area = Frame(self.tab_wave, bg='#ffffff', relief='sunken', bd=1)
+        self.plot_area.pack(side=RIGHT, fill=BOTH, expand=True, padx=10, pady=10)
+        self._plot_canvas = None
+
+        # Initial fill
+        self.refresh_waveform_list()
+
+    def refresh_waveform_list(self):
+        # Build flat label list
+        labels = []
+        index_map = []  # maps listbox rows to history column indices
+        search = (self.search_var.get().strip().lower() if hasattr(self, 'search_var') else '')
+        if hasattr(self, 'allhst') and isinstance(self.allhst, dict):
+            for _g, items in self.allhst.items():
+                for idx, name in enumerate(items):
+                    label = name if isinstance(name, str) else str(name)
+                    if (not search) or (search in label.lower()):
+                        labels.append(label)
+                        index_map.append(idx)
+        self.wf_list.delete(0, END)
+        for l in labels:
+            self.wf_list.insert(END, l)
+        self.wf_index_map = index_map
+
+    def _update_selection_from_listbox(self):
+        # Convert listbox selection to plotWvV/plotWvN
+        sel = self.wf_list.curselection()
+        if not sel:
+            return False
+        self.plotWvV = [self.wf_index_map[i] for i in sel]
+        # Pull back labels for names
+        self.plotWvN = [[self.wf_list.get(i)] for i in sel]
+        return True
+
+    def _embed_figure(self, fig):
+        # Destroy any previous canvas
+        for child in self.plot_area.winfo_children():
+            child.destroy()
+        canvas = FigureCanvasTkAgg(fig, master=self.plot_area)
+        canvas.draw()
+        toolbar = NavigationToolbar2Tk(canvas, self.plot_area)
+        toolbar.pack()
+        toolbar.update()
+        canvas.get_tk_widget().pack(side='top', fill='both', expand=True)
+        self._plot_canvas = canvas
+
+    def plot_time_tab(self):
+        try:
+            if not hasattr(self, 'trcs'):
+                messagebox.showerror('Error', 'Load a file first.')
+                return
+            if not self._update_selection_from_listbox():
+                messagebox.showwarning('No Selection', 'Select one or more waveforms from the list.')
+                return
+            i = len(self.plotWvV)
+            fig, axes = plt.subplots(i, figsize=(9, 6), dpi=100)
+            if i == 1:
+                axes = [axes]
+            for j in range(i):
+                wave_idx = int(self.plotWvV[j])
+                ax = axes[j]
+                ax.plot(self.trcs[0:(self.cycles+1),0], self.trcs[0:(self.cycles+1),(wave_idx+1)])
+                title_str = self.plotWvN[j][0] if isinstance(self.plotWvN[j], list) else str(self.plotWvN[j])
+                ax.set_title(title_str)
+                ax.set_xlabel('Time (s)')
+                ax.set_ylabel('Amplitude')
+            fig.tight_layout(pad=2.0)
+            self._embed_figure(fig)
+        except Exception as e:
+            self.logger.error(f"plot_time_tab error: {e}")
+            messagebox.showerror('Plot Error', f'Failed to plot time series: {e}')
+
+    def plot_fft_tab(self):
+        try:
+            if not hasattr(self, 'trcs'):
+                messagebox.showerror('Error', 'Load a file first.')
+                return
+            if not self._update_selection_from_listbox():
+                messagebox.showwarning('No Selection', 'Select one or more waveforms from the list.')
+                return
+            i = len(self.plotWvV)
+            fig, axes = plt.subplots(i, figsize=(9, 6), dpi=100)
+            if i == 1:
+                axes = [axes]
+            n_samples = int(self.cycles) + 1
+            dt = float(self.dt)
+            freq = fftfreq(n_samples, dt)[: n_samples // 2]
+            for j in range(i):
+                sel_idx = int(self.plotWvV[j])
+                y = self.trcs[0:n_samples, sel_idx + 1]
+                Yf = fft(y)
+                mag = (2.0 / n_samples) * np.abs(Yf[: n_samples // 2])
+                ax = axes[j]
+                ax.plot(freq, mag)
+                ax.set_xlabel('Frequency (Hz)')
+                ax.set_ylabel('Amplitude')
+                title_str = self.plotWvN[j][0] if isinstance(self.plotWvN[j], list) else str(self.plotWvN[j])
+                ax.set_title(f'FFT - {title_str}')
+            fig.tight_layout(pad=2.0)
+            self._embed_figure(fig)
+        except Exception as e:
+            self.logger.error(f"plot_fft_tab error: {e}")
+            messagebox.showerror('FFT Error', f'Failed to compute FFT: {e}')
+
+    def plot_lowpass_tab(self):
+        try:
+            if not hasattr(self, 'trcs'):
+                messagebox.showerror('Error', 'Load a file first.')
+                return
+            if not self._update_selection_from_listbox():
+                messagebox.showwarning('No Selection', 'Select one or more waveforms from the list.')
+                return
+            i = len(self.plotWvV)
+            fig, axes = plt.subplots(i, figsize=(9, 6), dpi=100)
+            if i == 1:
+                axes = [axes]
+            # Filter params
+            try:
+                filt_order = max(1, int(self.lp_order_var.get()))
+            except Exception:
+                filt_order = 4
+            fs = 1.0/float(self.dt)
+            try:
+                cutoff = float(self.lp_cutoff_var.get())
+            except Exception:
+                cutoff = None
+            if (cutoff is None) or (cutoff <= 0) or (cutoff >= fs/2):
+                cutoff = 0.1 * fs  # 10% of sampling rate; safely < Nyquist
+            sos = signal.butter(filt_order, cutoff, btype='low', fs=fs, output='sos')
+            for j in range(i):
+                wave_idx = int(self.plotWvV[j])
+                ax = axes[j]
+                ax.plot(self.trcs[0:(self.cycles+1),0],
+                        signal.sosfilt(sos, self.trcs[0:(self.cycles+1),(wave_idx+1)]))
+                title_str = self.plotWvN[j][0] if isinstance(self.plotWvN[j], list) else str(self.plotWvN[j])
+                ax.set_title(f'LP (fc={cutoff:.2f} Hz, N={filt_order}) - {title_str}')
+                ax.set_xlabel('Time (s)')
+                ax.set_ylabel('Amplitude')
+            fig.tight_layout(pad=2.0)
+            self._embed_figure(fig)
+        except Exception as e:
+            self.logger.error(f"plot_lowpass_tab error: {e}")
+            messagebox.showerror('Filter Error', f'Failed to apply low-pass filter: {e}')
+
         
 # read model file to identify the number of cycles, the timestep and the
 # the velocity histories to use the results in order to make it available for 
@@ -396,6 +637,8 @@ class WFile:
             self.nhist = nhist
             
             self.logger.debug(f"Successfully read history file with {nhist} histories and {self.cycles} cycles")
+
+            # Note: selection labels are provided via .m (readMfile) or .map (open_map_file)
             
         except FileNotFoundError as e:
             self.logger.error(f"History file not found: {e}")
@@ -408,97 +651,140 @@ class WFile:
      
  #plot original waveforms       
     def original(self):
-        self.hide_all_frames()
-        i=len(self.plotWvV)
-        # adding the subplot
-        fig, ax = plt.subplots(i)
-        fig.tight_layout(pad=2.0)
-        fig.figsize=(9,6)
-        for j in range(0,i):
-            x=self.plotWvV[j]
-            ax[j].plot(self.trcs[0:(self.cycles+1),0], self.trcs[0:(self.cycles+1),(x+1)])
-            #ax[j].plot.xlabel('Time (s)') 
-            #ax[j].plot.ylabel('Velocity (m/s)') 
-            ax[j].set_title(self.plotWvN[j])
-            #ax.show()
-        # plotting the graph
-        canvas1=Canvas(self.main_frame)
-        canvas1=FigureCanvasTkAgg(fig,master= self.top)
-        canvas1.draw()
-        toolbar = NavigationToolbar2Tk(canvas1,
-                                 self.top)
-        toolbar.pack()
-        toolbar.update()
-        canvas1.get_tk_widget().pack(side="top",fill='both',expand=True)
-        canvas1.pack(side="top",fill='both',expand=True)
-        canvas1.get_tk_widget().pack()   
+        try:
+            # Only applies to legacy toplevel flow
+            try:
+                self.hide_all_frames()
+            except Exception:
+                pass
+            i = len(self.plotWvV)
+            if i == 0:
+                messagebox.showwarning('No Selection', 'Please select at least one waveform to plot.')
+                return
+            # adding the subplot
+            fig, axes = plt.subplots(i, figsize=(9, 6), dpi=100)
+            fig.tight_layout(pad=2.0)
+            # Normalize axes to list
+            if i == 1:
+                axes = [axes]
+            for j in range(i):
+                wave_idx = int(self.plotWvV[j])
+                ax = axes[j]
+                ax.plot(self.trcs[0:(self.cycles+1),0], self.trcs[0:(self.cycles+1),(wave_idx+1)])
+                try:
+                    title_str = self.plotWvN[j]
+                    if isinstance(title_str, list) and title_str:
+                        title_str = title_str[0]
+                except Exception:
+                    title_str = f"Waveform {wave_idx+1}"
+                ax.set_title(title_str)
+                ax.set_xlabel('Time (s)')
+                ax.set_ylabel('Amplitude')
+            # Embed figure safely (Notebook if available, else toplevel)
+            self._embed_figure_safe(fig)
+        except Exception as e:
+            self.logger.error(f"Error in original(): {e}")
+            messagebox.showerror('Plot Error', f'Failed to plot original waveforms: {e}')
         
         
  #plot filtered waveforms       
     def lowpassFilter(self):
-        i=len(self.plotWvV)
-        # adding the subplot
-        fig, ax = plt.subplots(i)
-        fig.tight_layout(pad=2.0)
-        fig.figsize=(9,6)
-        if self.L!=None or self.L!=0:
-            sos = signal.butter(self.L, 'low', fs=1/float(self.dt), output='sos')
-        for j in range(0,i):
-            x=self.plotWvV[j]
-            ax[j].plot(self.trcs[0:(self.cycles+1),0], signal.sosfilt(sos, self.trcs[0:(self.cycles+1),(x+1)]))
-            #ax[j].plot.xlabel('Time (s)') 
-            #ax[j].plot.ylabel('Velocity (m/s)') 
-            ax[j].set_title(self.plotWvN[j])
-            #ax.show()
-        # plotting the graph
-        canvas1=Canvas(self.main_frame)
-        canvas1=FigureCanvasTkAgg(fig,master= self.top)
-        canvas1.draw()
-        toolbar = NavigationToolbar2Tk(canvas1,
-                                 self.top)
-        toolbar.pack()
-        toolbar.update()
-        canvas1.get_tk_widget().pack(side="top",fill='both',expand=True)
-        canvas1.pack(side="top",fill='both',expand=True)
-        canvas1.get_tk_widget().pack()   
+        try:
+            i=len(self.plotWvV)
+            if i == 0:
+                messagebox.showwarning('No Selection', 'Please select at least one waveform to plot.')
+                return
+            # adding the subplot
+            fig, axes = plt.subplots(i, figsize=(9, 6), dpi=100)
+            fig.tight_layout(pad=2.0)
+            if i == 1:
+                axes = [axes]
+            # Use a reasonable default order if not set
+            filt_order = 4
+            try:
+                if hasattr(self, 'L') and self.L not in (None, '', 0):
+                    filt_order = int(self.L)
+            except Exception:
+                pass
+            sos = signal.butter(filt_order, 'low', fs=1/float(self.dt), output='sos')
+            for j in range(i):
+                wave_idx = int(self.plotWvV[j])
+                ax = axes[j]
+                ax.plot(self.trcs[0:(self.cycles+1),0],
+                        signal.sosfilt(sos, self.trcs[0:(self.cycles+1),(wave_idx+1)]))
+                try:
+                    title_str = self.plotWvN[j]
+                    if isinstance(title_str, list) and title_str:
+                        title_str = title_str[0]
+                except Exception:
+                    title_str = f"Waveform {wave_idx+1}"
+                ax.set_title(title_str)
+                ax.set_xlabel('Time (s)')
+                ax.set_ylabel('Amplitude')
+            self._embed_figure_safe(fig)
+        except Exception as e:
+            self.logger.error(f"Error in lowpassFilter(): {e}")
+            messagebox.showerror('Filter Error', f'Failed to apply lowpass filter: {e}')
         
         
 #plot fourier waveforms        
     def fourier(self):
-        self.hide_all_frames()
-        i=len(self.plotWvV)
-        # adding the subplot
-        fig, ax = plt.subplots(i)
-        fig.tight_layout(pad=2.0)
-        fig.figsize=(9,6)
-        #fig=Figure(figsize=(5,3),dpi=100)
-        #gs = fig.add_gridspec(i, hspace=0)
-        #ax=sg.subplots(sharex=True, sharey=True)
-        N=int(self.cycles)
-        T=float(self.dt)
-        
-        
-        for j in range(0,i):
-            x=self.plotWvV[j]
-            yf=fft(self.trcs[0:(N+1),(x+1)])
-            xf=fftfreq(N, T)[:N//2]
-            
-            ax[j].plot(xf, 2.0/N * np.abs(yf[0:N//2]))
-            #ax[j].plot.xlabel('Time (s)') 
-            #ax[j].plot.ylabel('Velocity (m/s)') 
-            ax[j].set_title(self.plotWvN[j])
-            #ax.show()
-            # plotting the graph
-        canvas1=Canvas(self.main_frame)
-        canvas1=FigureCanvasTkAgg(fig,master= self.top)
-        canvas1.draw()
-        toolbar = NavigationToolbar2Tk(canvas1,
-                                     self.top)
-        toolbar.pack()
-        toolbar.update()
-        canvas1.get_tk_widget().pack(side="top",fill='both',expand=True)
-        canvas1.pack(side="top",fill='both',expand=True)
-        canvas1.get_tk_widget().pack()   
+        """Plot FFT magnitude for selected waveforms in a new window panel."""
+        try:
+            # Basic guards similar to plot()
+            if 'filename' not in globals() or filename is None:
+                messagebox.showerror('Error', 'No file loaded. Please open a .hst file first.')
+                return
+            if not hasattr(self, 'trcs') or not hasattr(self, 'nhist'):
+                messagebox.showerror('Error', 'No waveform data available. Please load a file first.')
+                return
+            if not hasattr(self, 'plotWvV') or len(self.plotWvV) == 0:
+                messagebox.showwarning('No Selection', 'Please select at least one waveform to analyze (Data -> More Waveforms).')
+                return
+            try:
+                self.hide_all_frames()
+            except Exception:
+                pass
+
+            num_selected = len(self.plotWvV)
+
+            # Build figure
+            fig, axes = plt.subplots(num_selected, figsize=(9, 6), dpi=100)
+            fig.tight_layout(pad=2.0)
+
+            # Normalize axes to a list for both single/multiple cases
+            if num_selected == 1:
+                axes = [axes]
+
+            # FFT parameters
+            n_samples = int(self.cycles) + 1
+            dt = float(self.dt)
+            freq = fftfreq(n_samples, dt)[: n_samples // 2]
+
+            for idx, sel_idx in enumerate(self.plotWvV):
+                # Extract time series
+                y = self.trcs[0:n_samples, sel_idx + 1]
+                Yf = fft(y)
+                mag = (2.0 / n_samples) * np.abs(Yf[: n_samples // 2])
+
+                ax = axes[idx]
+                ax.plot(freq, mag)
+                ax.set_xlabel('Frequency (Hz)')
+                ax.set_ylabel('Amplitude')
+                # Title uses provided names if available
+                try:
+                    title_str = self.plotWvN[idx]
+                    # plotWvN items are lists like [name]; render nicely
+                    if isinstance(title_str, list) and title_str:
+                        title_str = title_str[0]
+                except Exception:
+                    title_str = f'Waveform {sel_idx + 1}'
+                ax.set_title(f'FFT - {title_str}')
+
+            # Embed safely
+            self._embed_figure_safe(fig)
+        except Exception as e:
+            messagebox.showerror('FFT Error', f'Failed to compute FFT: {e}')
             
 
         
@@ -676,7 +962,8 @@ class WFile:
                     # Get the variable name and add to selection
                     var_name = self.allhst[hist_index][var_index]
                     plotWvN.append([var_name])  # Keep as list to match original format
-                    plotWvV.append(hist_index)  # Use hist_index as the waveform index
+                    # Use the variable index as the waveform index within the trace matrix
+                    plotWvV.append(var_index)
                     
                     self.logger.debug(f"Selected waveform: {var_name} (index: {hist_index})")
             
@@ -962,6 +1249,22 @@ class WFile:
                 # If .m exists, parse it for dt/cycles/wave labels
                 if m_path and os.path.exists(m_path):
                     WFile.readMfile(self, m_path)
+                # If model did not yield labels, try deriving them from .map
+                try:
+                    total_named = 0
+                    if hasattr(self, 'allhst') and isinstance(self.allhst, dict):
+                        for _k, lst in self.allhst.items():
+                            try:
+                                total_named += len(lst)
+                            except Exception:
+                                pass
+                    if (not hasattr(self, 'allhst')) or (not self.allhst) or (total_named == 0):
+                        labels = history_labels_from_map(path)
+                        if labels:
+                            self.allhst = {0: labels}
+                            self.logger.info("Derived %d history labels from .map", len(labels))
+                except Exception as e:
+                    self.logger.warning(f"Failed to derive labels from .map: {e}")
                 WFile.read_W_file(self, hst_path)
                 self.update_status("Loaded via MAP → HST successfully")
             else:

@@ -6,3 +6,33 @@ alwaysApply: true
 - The 'Manolis_pythhon_version' directory has the Python code that we will be working with. 
 - Never modify files with the following extensions unless explicitly requested: PAS, pas, SET, PRT, crk, dmp, geo, hst, m, map, psc, snp, EXE
 
+## Map File Parsing Architecture
+
+### Overview
+The project uses a two-tier approach for parsing .MAP files:
+
+1. **Basic Reader** (`python_code/read_map_file.py`):
+   - Lightweight summary parser for quick overviews
+   - Counts record types and extracts basic metadata
+   - Used by WaveViewer_stable.py for file discovery and basic info
+
+2. **Full Reader** (`python_code/read_map_file_full.py`):
+   - Complete parser mirroring Turbo Pascal DATA_RSC.PAS structures
+   - Reconstructs all record fields and computed offsets
+   - Provides dataclasses for SnapMapRecord, HistMapRecord, DumpMapRecord, GeomMapRecord, CrackDMapRecord
+
+### File Format (per DATA_RSC.PAS)
+- Each .MAP record: 8-byte header + 120-byte body
+- Header: (dummy_int, pl_type) where pl_type = 0=Snapshot, 1=History, 2=Dump, 3=Geometry, 4=Crack
+- Body: Variable-length field section + padding (only leading bytes used per record type)
+
+### Offset Computation
+The full reader computes file offsets exactly like Pascal DI_ReadMap:
+- **Snapshots (.SNP)**: `offset += Xqty * (Yqty + 2)` (float32 elements)
+- **Histories (.HST)**: `offset += Xqty * 3` (float32 elements)  
+- **Dumps (.DMP)**: `offset += 1 + iqty*jqty*kqty*Vqty + 1` (float32 elements)
+- **Geometries (.GEO)**: `offset += GRlen` (bytes)
+- **Crack data (.CRK)**: `offset += CrLen` (bytes)
+
+
+

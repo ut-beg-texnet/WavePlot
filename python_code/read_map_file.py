@@ -30,7 +30,7 @@ from __future__ import annotations
 import os
 import struct
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 
 # Fixed size of each record payload after the 8‑byte header (see DATA_RSC.PAS
@@ -90,6 +90,109 @@ def base_to_related_paths(base: str) -> dict:
         "dmp": base + ".dmp",
         "geo": base + ".geo",
     }
+
+
+# ---------------- Variable name mapping (from DATA_RSC.PAS) -----------------
+
+# Section counts
+_ngrvar = 10; _ngcvar = 21; _nstvar = 21; _nscvar = 11
+_ngmxvar = 1; _nsmxvar = 8; _ngacvar = 3; _nsacvar = 1; _nmixvar = 4
+
+# Section offsets
+_grnam0 = 0; _gcnam0 = 20; _stnam0 = 50; _scnam0 = 100
+_gmxnam0 = 150; _smxnam0 = 175; _gacnam0 = 200; _sacnam0 = 225; _mixnam0 = 235
+
+# Function names for HFunc (index 0..5 in Pascal; 0 is empty)
+_VFUNC = ['', 'MX', 'mn', 'Avg', 'Abs', 'AMX']
+
+# Variable name tables (taken from DATA_RSC.PAS)
+_GRVAR = ['XVEL','YVEL','S11','S22','S12','ZVEL','S33','S23','S31','S31']
+_GCVAR = ['DIL','V-abs','TauMx','Sig-3','Sig-1','Sig-2','M-Ang1','ESS','DEV',
+          'aXVEL','aYVEL','aS12','aZVEL','aS23','aS31','aS31','S.E.','K.E.',
+          'T.E.','Fail','e-plas']
+_STVAR = ['t11_s1','t11_s0','t1v_s1','t1v_s0','t1sh','t1d-r',
+          'nvel-r','ndis-r','Sh-bnd','T1slip','TaSlip','N-bnd',
+          't22_s1','t22_s0','t2v_s1','t2v_s0','t1t2s1','t1t2s0','t2sh','t2d-r','T2slip']
+_SCVAR = ['nd-s1','nd-s0','Tad-r','t1d_s1','t1d_s0','t2d_s1','t2d_s0',
+          'stv_s1','stv_s0','sts_s1','sts_s0']
+_GMXVAR = ['MaxVel']
+_SMXVAR = ['nv-mx','nd-mx','t1v-mx','t1d-mx','t2v-mx','t2d-mx','t11-mx','t22-mx']
+_GACVAR = ['Xdisp','Ydisp','Zdisp']
+_SACVAR = ['']
+_MIXVAR = ['skn','sks','sNs','sSs']
+
+
+def _var_name(vnum: int) -> str:
+    """Python port of VarName from DATA_RSC.PAS."""
+    if vnum <= 0:
+        return ''
+    if (_grnam0+1) <= vnum <= _gcnam0:
+        return _GRVAR[vnum-_grnam0-1]
+    if (_gcnam0+1) <= vnum <= _stnam0:
+        return _GCVAR[vnum-_gcnam0-1]
+    if (_stnam0+1) <= vnum <= _scnam0:
+        return _STVAR[vnum-_stnam0-1]
+    if (_scnam0+1) <= vnum <= _gmxnam0:
+        return _SCVAR[vnum-_scnam0-1]
+    if (_gmxnam0+1) <= vnum <= _smxnam0:
+        return _GMXVAR[vnum-_gmxnam0-1]
+    if (_smxnam0+1) <= vnum <= _gacnam0:
+        return _SMXVAR[vnum-_smxnam0-1]
+    if (_gacnam0+1) <= vnum <= _sacnam0:
+        return _GACVAR[vnum-_gacnam0-1]
+    if (_sacnam0+1) <= vnum <= _mixnam0:
+        return _SACVAR[vnum-_sacnam0-1]
+    if (_mixnam0+1) <= vnum <= 254:
+        return _MIXVAR[vnum-_mixnam0-1]
+    if vnum == 255:
+        return 'Form'
+    return ''
+
+
+def history_labels_from_map(map_path: str) -> List[str]:
+    """Return human-readable labels for each history record (pl_type==1).
+
+    The label is built from VarName(Vnum) plus the function suffix derived from
+    HFunc (embedded in HistVar as in DATA_RSC.PAS). If multiple histories share
+    the same base name, a running index is appended to make labels unique.
+    """
+    labels: List[str] = []
+    if not os.path.exists(map_path):
+        return labels
+    counts: Dict[str, int] = {}
+    with open(map_path, 'rb') as f:
+        while True:
+            header = f.read(8)
+            if len(header) < 8:
+                break
+            try:
+                _, pl_type = struct.unpack('<II', header)
+            except struct.error:
+                break
+
+            body = f.read(MAP_RECORD_BODY_BYTES)
+            if len(body) < MAP_RECORD_BODY_BYTES:
+                break
+
+            if pl_type == 1:
+                try:
+                    histvar_raw = struct.unpack('<l', body[0:4])[0]
+                    # Unpack combined HistVar (low 16 bits) and HFunc (div by 0xFFFF) like Pascal
+                    hfunc = histvar_raw // 0xFFFF
+                    vnum = histvar_raw % 0xFFFF
+                    base = _var_name(vnum) or f'var{vnum}'
+                    suffix = _VFUNC[hfunc] if 0 <= hfunc < len(_VFUNC) else ''
+                    name = base + (f'-{suffix}' if suffix else '')
+                except Exception:
+                    name = 'hist'
+
+                # Make unique
+                counts[name] = counts.get(name, 0) + 1
+                idx = counts[name]
+                label = f"{name}_{idx}" if idx > 1 else name
+                labels.append(label)
+
+    return labels
 
 
 def read_map_summary(map_path: str) -> MapSummary:
