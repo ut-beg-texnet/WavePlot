@@ -1,4 +1,9 @@
-"""Tkinter GUI for the WavePlot Python port."""
+"""Tkinter GUI for the WavePlot Python port.
+
+This module provides a graphical user interface for visualizing WAVE project data.
+The GUI allows users to browse snapshots, histories, and dumps, plot them with
+various colormaps, overlay geometry, and evaluate history formulas.
+"""
 
 from __future__ import annotations
 
@@ -15,7 +20,8 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 from matplotlib.figure import Figure
 from tkinter import ttk
 
-try:  # Matplotlib >= 3.5
+# Try to use modern Matplotlib colormap registry (3.5+)
+try:
     from matplotlib import colormaps as _cm_registry  # type: ignore
 except Exception:  # pragma: no cover - fallback for older Matplotlib
     _cm_registry = None
@@ -23,10 +29,16 @@ except Exception:  # pragma: no cover - fallback for older Matplotlib
 from ..geometry_loader import GeometryOverlay
 from ..project import FormulaResult, WaveProject
 from ..map_parser import DumpMapRecord, HistMapRecord, SnapMapRecord
+from ..logger import get_logger
 
 
 def _available_colormaps() -> List[str]:
-    """Return a readable list of diverging/sequential maps without reversed variants."""
+    """Get list of available colormap names, excluding reversed variants.
+    
+    Returns:
+        Sorted list of colormap names (e.g., 'viridis', 'plasma', 'coolwarm')
+        Reversed colormaps (ending in '_r') are excluded to avoid clutter.
+    """
     if _cm_registry is not None:
         names = list(_cm_registry)
     else:
@@ -39,30 +51,64 @@ def _available_colormaps() -> List[str]:
 
 
 class WavePlotApp(tk.Tk):
-    """Main application window."""
+    """Main Tkinter application window for WavePlot.
+    
+    This class provides the complete GUI interface including:
+    - File browser for selecting .map files
+    - Tree view for browsing snapshots, histories, and dumps
+    - Matplotlib canvas for plotting data
+    - Controls for colormap selection, dump component selection, and color scale
+    - Formula evaluation and filtering capabilities
+    - Geometry overlay visualization
+    """
 
-    def __init__(self, map_path: Optional[str] = None) -> None:
+    def __init__(self, map_path: Optional[str] = None, debug: bool = False) -> None:
+        """Initialize the WavePlot application window.
+        
+        Args:
+            map_path: Optional path to a .map file to load on startup
+            debug: If True, enable debug logging
+        """
         super().__init__()
-        self.title("WavePlot (Python Edition)")
+        self.title("WavePlot")
         self.geometry("1200x720")
         self.minsize(900, 600)
         self.configure(bg="#f4f6fb")
 
+        # Logger instance (None if debug is disabled)
+        self.logger = get_logger() if debug else None
+        
+        # Current project (None until a file is loaded)
         self.project: Optional[WaveProject] = None
+        # Mapping: tree_item_id -> (record_type, index)
         self._tree_map: Dict[str, Tuple[str, int]] = {}
+        # Current selection: (data_type, list_of_indices)
         self._current_selection: Optional[Tuple[str, List[int]]] = None
+        # UI state variables
         self._current_cmap = tk.StringVar(value='viridis')
         self._dump_component = tk.StringVar(value='0')
+        # Matplotlib artists and widgets for cleanup
         self._colorbars: List[object] = []
         self._image_artist: Optional[object] = None
-        # Colorbar widget tracking (Matplotlib widgets placed near the colorbar)
-        self._cb_widget_axes: List[object] = []
+        self._cb_widget_axes: List[object] = []  # Colorbar widget axes
         self._vmin_box: Optional[TextBox] = None
         self._vmax_box: Optional[TextBox] = None
         self._auto_btn: Optional[Button] = None
-        self._overlay_artists: List[object] = []
+        self._overlay_artists: List[object] = []  # Geometry overlay patches
+        # Color scale lock state
+        self._lock_color_scale: bool = False
+        self._locked_vmin: Optional[float] = None
+        self._locked_vmax: Optional[float] = None
+        self._lock_btn: Optional[Button] = None
 
+        if self.logger:
+            self.logger.info("WavePlot application starting")
+        
         self._build_ui()
+        
+        # Bind cleanup on window close
+        self.protocol("WM_DELETE_WINDOW", self._on_closing)
+        
         if map_path:
             self.load_project(map_path)
 
@@ -119,6 +165,15 @@ class WavePlotApp(tk.Tk):
         self.filter_button.pack(fill=tk.X, pady=(4, 0))
 
     def _build_detail_panel(self) -> None:
+        """Build the detail/plotting panel.
+        
+        Creates the right panel containing:
+        - Colormap selector dropdown
+        - Dump component selector (for multi-variable dumps)
+        - Multi-variable slider (for browsing multiple snapshots)
+        - Matplotlib figure canvas with toolbar
+        - Metadata text display area
+        """
         top_bar = ttk.Frame(self.detail_frame)
         top_bar.pack(fill=tk.X, pady=(0, 8))
 
@@ -132,7 +187,11 @@ class WavePlotApp(tk.Tk):
             state='readonly',
         )
         cmap_box.pack(side=tk.LEFT, padx=(4, 16))
-        cmap_box.bind('<<ComboboxSelected>>', lambda _: self._refresh_plot())
+        def _on_cmap_change(_event: tk.Event) -> None:
+            if self.logger:
+                self.logger.info(f"Colormap changed to: {self._current_cmap.get()}")
+            self._refresh_plot()
+        cmap_box.bind('<<ComboboxSelected>>', _on_cmap_change)
 
         ttk.Label(top_bar, text="Dump component:").pack(side=tk.LEFT)
         self.dump_combo = ttk.Combobox(
@@ -143,15 +202,23 @@ class WavePlotApp(tk.Tk):
             state='readonly',
         )
         self.dump_combo.pack(side=tk.LEFT, padx=(4, 16))
-        self.dump_combo.bind('<<ComboboxSelected>>', lambda _: self._refresh_plot())
+        def _on_dump_component_change(_event: tk.Event) -> None:
+            if self.logger:
+                self.logger.info(f"Dump component changed to: {self._dump_component.get()}")
+            self._refresh_plot()
+        self.dump_combo.bind('<<ComboboxSelected>>', _on_dump_component_change)
 
         self.multi_var = tk.IntVar(value=0)
+        def _on_slider_change(value: str) -> None:
+            if self.logger:
+                self.logger.debug(f"Multi-snapshot slider moved to: {value}")
+            self._refresh_plot()
         self.multi_slider = ttk.Scale(
             top_bar,
             from_=0,
             to=0,
             variable=self.multi_var,
-            command=lambda _: self._refresh_plot(),
+            command=_on_slider_change,
         )
         self.multi_slider.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.multi_slider.configure(state='disabled')
@@ -178,21 +245,46 @@ class WavePlotApp(tk.Tk):
     # Project loading ------------------------------------------------------
 
     def load_project(self, map_path: str) -> None:
+        """Load a WAVE project from a .map file.
+        
+        Parses the map file, initializes the project, and populates the tree view
+        with available snapshots, histories, and dumps.
+        
+        Args:
+            map_path: Path to the .map file to load
+        """
+        if self.logger:
+            self.logger.info(f"Loading project: {map_path}")
         try:
             self.project = WaveProject(map_path)
+            if self.logger:
+                self.logger.info(f"Successfully loaded project: {os.path.basename(map_path)}")
+                # Log project summary
+                snap_count = len(self.project.snapshot_records())
+                hist_count = len(self.project.history_records())
+                dump_count = len(self.project.dump_records())
+                self.logger.debug(f"Project contains: {snap_count} snapshots, {hist_count} histories, {dump_count} dumps")
         except Exception as exc:
+            if self.logger:
+                self.logger.error(f"Failed to load project: {map_path}", exc_info=True)
             messagebox.showerror("WavePlot", f"Failed to load project:\n{exc}")
             return
         self._populate_tree()
         self._status_message(f"Loaded {os.path.basename(map_path)}")
 
     def _open_map_dialog(self) -> None:
+        if self.logger:
+            self.logger.info("Opening file dialog")
         path = filedialog.askopenfilename(
             title="Select .map file",
             filetypes=[('WavePlot map', '*.map'), ('All files', '*.*')],
         )
         if path:
+            if self.logger:
+                self.logger.info(f"User selected file: {path}")
             self.load_project(path)
+        elif self.logger:
+            self.logger.debug("File dialog cancelled by user")
 
     def _populate_tree(self) -> None:
         for item in self.tree.get_children(''):
@@ -201,6 +293,7 @@ class WavePlotApp(tk.Tk):
         if not self.project:
             return
         snaps_node = self.tree.insert('', 'end', text='Snapshots')
+        snap_count = 0
         for rec in self.project.snapshot_records():
             desc = (
                 f"#{rec.index} {rec.variable} | {rec.x_qty}x{rec.y_qty} | "
@@ -208,7 +301,9 @@ class WavePlotApp(tk.Tk):
             )
             node = self.tree.insert(snaps_node, 'end', text=desc)
             self._tree_map[node] = ('snap', rec.index - 1)
+            snap_count += 1
         hists_node = self.tree.insert('', 'end', text='Histories')
+        hist_count = 0
         for rec in self.project.history_records():
             desc = (
                 f"#{rec.index} {rec.variable} | samples={rec.sample_qty} | "
@@ -216,7 +311,9 @@ class WavePlotApp(tk.Tk):
             )
             node = self.tree.insert(hists_node, 'end', text=desc)
             self._tree_map[node] = ('hist', rec.index - 1)
+            hist_count += 1
         dumps_node = self.tree.insert('', 'end', text='Dumps')
+        dump_count = 0
         for rec in self.project.dump_records():
             desc = (
                 f"#{rec.index} | grid={rec.i_qty}x{rec.j_qty}x{max(rec.k_qty,1)} | "
@@ -224,9 +321,12 @@ class WavePlotApp(tk.Tk):
             )
             node = self.tree.insert(dumps_node, 'end', text=desc)
             self._tree_map[node] = ('dump', rec.index - 1)
+            dump_count += 1
         self.tree.item(snaps_node, open=True)
         self.tree.item(hists_node, open=True)
         self.tree.item(dumps_node, open=False)
+        if self.logger:
+            self.logger.debug(f"Populated tree: {snap_count} snapshots, {hist_count} histories, {dump_count} dumps")
 
     # Tree interactions ----------------------------------------------------
 
@@ -235,29 +335,41 @@ class WavePlotApp(tk.Tk):
             return
         selection = [item for item in self.tree.selection() if item in self._tree_map]
         if not selection:
+            if self.logger:
+                self.logger.debug("Tree selection cleared")
             return
         types = {self._tree_map[item][0] for item in selection}
         if len(types) > 1:
+            if self.logger:
+                self.logger.debug("User selected multiple types, showing warning")
             messagebox.showinfo("WavePlot", "Please select entries from one group at a time.")
             return
         selected_type = next(iter(types))
         indices = sorted(self._tree_map[item][1] for item in selection)
         self._current_selection = (selected_type, indices)
+        if self.logger:
+            self.logger.info(f"Tree selection: {selected_type} {indices}")
         self._update_controls(selected_type, len(indices))
         self._refresh_plot()
 
     def _update_controls(self, data_type: str, count: int) -> None:
+        if self.logger:
+            self.logger.debug(f"Updating controls for {data_type} (count={count})")
         if data_type == 'dump':
             record = self.project.dump_records()[self._current_selection[1][0]]
             values = [str(i) for i in range(record.v_qty)]
             self.dump_combo.configure(values=values, state='readonly')
             if self._dump_component.get() not in values:
                 self._dump_component.set(values[0])
+            if self.logger:
+                self.logger.debug(f"Dump component selector enabled with {len(values)} components")
         else:
             self.dump_combo.configure(values=["0"], state='disabled')
         if data_type == 'snap' and count > 1:
             self.multi_slider.configure(state='normal', from_=0, to=count - 1)
             self.multi_var.set(0)
+            if self.logger:
+                self.logger.debug(f"Multi-snapshot slider enabled (range 0-{count-1})")
         else:
             self.multi_slider.configure(state='disabled', from_=0, to=0)
             self.multi_var.set(0)
@@ -278,9 +390,13 @@ class WavePlotApp(tk.Tk):
         self.axes.clear()
         self._image_artist = None
         if not self.project or not self._current_selection:
+            if self.logger:
+                self.logger.debug("Plot refresh skipped: no project or selection")
             self.canvas.draw_idle()
             return
         data_type, indices = self._current_selection
+        if self.logger:
+            self.logger.info(f"Refreshing plot: {data_type} {indices}")
         if data_type == 'snap':
             self._plot_snapshot(indices)
         elif data_type == 'hist':
@@ -290,21 +406,39 @@ class WavePlotApp(tk.Tk):
         self.canvas.draw_idle()
 
     def _plot_snapshot(self, indices: List[int]) -> None:
+        """Plot snapshot data as a 2D image with optional geometry overlay.
+        
+        Args:
+            indices: List of snapshot indices (uses slider position if multiple)
+        """
+        # Select snapshot based on slider if multiple selected
         idx = indices[int(self.multi_var.get())] if len(indices) > 1 else indices[0]
         record = self.project.snapshot_records()[idx]
+        if self.logger:
+            self.logger.info(f"Plotting snapshot #{record.index} ({record.variable})")
         data = self.project.snapshot_array(idx)
+        if self.logger:
+            self.logger.debug(f"Snapshot data shape: {data.shape}, range: [{data.min():.3e}, {data.max():.3e}]")
         cmap = cm.get_cmap(self._current_cmap.get())
-        im = self.axes.imshow(
-            data.T,
-            origin='lower',
-            cmap=cmap,
-            aspect='auto',
-        )
+        # Use locked color scale if enabled
+        imshow_kwargs = {
+            'origin': 'lower',
+            'cmap': cmap,
+            'aspect': 'auto',
+        }
+        if self._lock_color_scale and self._locked_vmin is not None and self._locked_vmax is not None:
+            imshow_kwargs['vmin'] = self._locked_vmin
+            imshow_kwargs['vmax'] = self._locked_vmax
+            if self.logger:
+                self.logger.debug(f"Using locked color scale: vmin={self._locked_vmin:.3e}, vmax={self._locked_vmax:.3e}")
+        # Transpose data for correct orientation (imshow expects row-major)
+        im = self.axes.imshow(data.T, **imshow_kwargs)
         self._image_artist = im
+        # Add colorbar with min/max controls
         colorbar = self.figure.colorbar(im, ax=self.axes, fraction=0.046, pad=0.04)
         self._colorbars.append(colorbar)
-        # Attach min/max boxes at the top and bottom of the colorbar and an Auto button
         self._attach_colorbar_controls(colorbar)
+        # Add geometry overlay if available
         if self.project:
             overlay = self.project.snapshot_geometry_overlay(idx)
             self._draw_geometry_overlay(overlay)
@@ -314,8 +448,19 @@ class WavePlotApp(tk.Tk):
         self._write_metadata(_snapshot_metadata(record))
 
     def _plot_history(self, indices: List[int]) -> None:
+        """Plot one or more history time series.
+        
+        Multiple histories are plotted on the same axes with different colors/labels.
+        
+        Args:
+            indices: List of history indices to plot
+        """
+        if self.logger:
+            self.logger.info(f"Plotting {len(indices)} history/histories: {indices}")
         for idx in indices:
             axis, values, record = self.project.history_series(idx)
+            if self.logger:
+                self.logger.debug(f"History #{record.index} ({record.variable}): {len(values)} samples, range: [{values.min():.3e}, {values.max():.3e}]")
             self.axes.plot(axis, values, label=f"#{record.index} {record.variable}")
         self.axes.legend()
         self.axes.set_title("History")
@@ -325,15 +470,43 @@ class WavePlotApp(tk.Tk):
         self._write_metadata(details)
 
     def _plot_dump(self, index: int) -> None:
+        """Plot dump volume data as a 2D slice.
+        
+        Extracts a 2D slice from the 4D dump volume based on the selected component
+        and displays it with optional geometry overlay.
+        
+        Args:
+            index: Dump index to plot
+        """
         record = self.project.dump_records()[index]
+        if self.logger:
+            self.logger.info(f"Plotting dump #{record.index}")
         volume, _ = self.project.dump_volume(index)
+        # Get selected component index (clamped to valid range)
         comp = int(self._dump_component.get())
         comp = min(max(comp, 0), volume.shape[-1] - 1)
+        if self.logger:
+            self.logger.debug(f"Dump volume shape: {volume.shape}, selected component: {comp}")
+        # Extract 2D slice: first k-layer, selected component
         data2d = volume[0, :, :, comp]
+        if self.logger:
+            self.logger.debug(f"2D slice shape: {data2d.shape}, range: [{data2d.min():.3e}, {data2d.max():.3e}]")
         cmap = cm.get_cmap(self._current_cmap.get())
-        im = self.axes.imshow(data2d.T, origin='lower', cmap=cmap, aspect='auto')
+        # Use locked color scale if enabled
+        imshow_kwargs = {
+            'origin': 'lower',
+            'cmap': cmap,
+            'aspect': 'auto',
+        }
+        if self._lock_color_scale and self._locked_vmin is not None and self._locked_vmax is not None:
+            imshow_kwargs['vmin'] = self._locked_vmin
+            imshow_kwargs['vmax'] = self._locked_vmax
+            if self.logger:
+                self.logger.debug(f"Using locked color scale: vmin={self._locked_vmin:.3e}, vmax={self._locked_vmax:.3e}")
+        im = self.axes.imshow(data2d.T, **imshow_kwargs)
         colorbar = self.figure.colorbar(im, ax=self.axes, fraction=0.046, pad=0.04)
         self._colorbars.append(colorbar)
+        # Add geometry overlay if available
         if self.project:
             overlay = self.project.dump_geometry_overlay(index)
             self._draw_geometry_overlay(overlay)
@@ -350,16 +523,26 @@ class WavePlotApp(tk.Tk):
         data_type, indices = self._current_selection
         if data_type != 'hist':
             return
+        if self.logger:
+            self.logger.info("Opening formula dialog")
         formula = simpledialog.askstring(
             "Combine histories",
             "Enter formula using [1], [2], ... for the selected histories",
             parent=self,
         )
         if not formula:
+            if self.logger:
+                self.logger.debug("Formula dialog cancelled")
             return
+        if self.logger:
+            self.logger.info(f"Evaluating formula: {formula} on histories {indices}")
         try:
             result = self.project.evaluate_history_formula(indices, formula)
+            if self.logger:
+                self.logger.debug(f"Formula result: {len(result.values)} samples, axis: {result.axis_label}")
         except Exception as exc:
+            if self.logger:
+                self.logger.error(f"Formula evaluation failed: {formula}", exc_info=True)
             messagebox.showerror("WavePlot", f"Formula failed:\n{exc}")
             return
         self._plot_formula(result)
@@ -371,6 +554,8 @@ class WavePlotApp(tk.Tk):
         if data_type != 'hist' or len(indices) != 1:
             return
 
+        if self.logger:
+            self.logger.info("Opening Butterworth filter dialog")
         low = simpledialog.askstring(
             "Butterworth filter",
             "Low cut frequency (leave empty for low-pass).\n"
@@ -378,6 +563,8 @@ class WavePlotApp(tk.Tk):
             parent=self,
         )
         if low is None:
+            if self.logger:
+                self.logger.debug("Filter dialog cancelled")
             return
         high = simpledialog.askstring(
             "Butterworth filter",
@@ -386,6 +573,8 @@ class WavePlotApp(tk.Tk):
             parent=self,
         )
         if high is None:
+            if self.logger:
+                self.logger.debug("Filter dialog cancelled")
             return
 
         order = simpledialog.askstring(
@@ -394,6 +583,8 @@ class WavePlotApp(tk.Tk):
             parent=self,
         )
         if order is None:
+            if self.logger:
+                self.logger.debug("Filter dialog cancelled")
             return
         zero_phase = messagebox.askyesno(
             "Butterworth filter",
@@ -409,10 +600,14 @@ class WavePlotApp(tk.Tk):
             flo = _parse(low) if low is not None else None
             fhi = _parse(high) if high is not None else None
             if flo is None and fhi is None:
+                if self.logger:
+                    self.logger.warning("Filter parameters: both frequencies empty")
                 messagebox.showerror("WavePlot", "Please provide at least one cutoff frequency.")
                 return
             order_val = int(order.strip()) if order and order.strip() else 4
         except ValueError:
+            if self.logger:
+                self.logger.error("Invalid filter parameter values", exc_info=True)
             messagebox.showerror("WavePlot", "Invalid numeric value for filter parameters.")
             return
 
@@ -421,15 +616,24 @@ class WavePlotApp(tk.Tk):
                 str(max(order_val, 1)), str(zero_flag)]
         formula = "t(" + ", ".join(args) + ")"
 
+        if self.logger:
+            self.logger.info(f"Applying Butterworth filter: low={flo}, high={fhi}, order={order_val}, zero_phase={zero_phase}")
+
         try:
             result = self.project.evaluate_history_formula(indices, formula)
             result.description = "Butterworth filter"
+            if self.logger:
+                self.logger.debug(f"Filter result: {len(result.values)} samples")
         except Exception as exc:
+            if self.logger:
+                self.logger.error("Filtering failed", exc_info=True)
             messagebox.showerror("WavePlot", f"Filtering failed:\n{exc}")
             return
         self._plot_formula(result)
 
     def _plot_formula(self, result: FormulaResult) -> None:
+        if self.logger:
+            self.logger.info(f"Plotting formula result: {result.description}")
         self._clear_colorbars()
         self._clear_overlay_artists()
         self.axes.clear()
@@ -559,6 +763,8 @@ class WavePlotApp(tk.Tk):
             vmax = float(np.nanmax(arr))
         except ValueError:
             # Empty array or all-NaN; do nothing
+            if self.logger:
+                self.logger.debug("Auto color scale: empty array or all-NaN, skipping")
             return
         self._image_artist.set_clim(vmin=vmin, vmax=vmax)
         for cb in self._colorbars:
@@ -566,6 +772,40 @@ class WavePlotApp(tk.Tk):
                 cb.update_normal(self._image_artist)
             except Exception:
                 pass
+        self.canvas.draw_idle()
+        
+        # If lock is enabled, update locked values to new auto-scaled values
+        if self._lock_color_scale:
+            self._locked_vmin = vmin
+            self._locked_vmax = vmax
+            if self.logger:
+                self.logger.debug(f"Updated locked color scale: vmin={vmin:.3e}, vmax={vmax:.3e}")
+
+    def _toggle_color_scale_lock(self) -> None:
+        """Toggle color scale lock state."""
+        if not self._image_artist:
+            return
+        
+        if self._lock_color_scale:
+            # Disable lock
+            self._lock_color_scale = False
+            self._locked_vmin = None
+            self._locked_vmax = None
+            if self._lock_btn:
+                self._lock_btn.label.set_text('Lock')
+            if self.logger:
+                self.logger.info("Color scale lock disabled")
+        else:
+            # Enable lock - store current vmin/vmax
+            vmin, vmax = self._image_artist.get_clim()
+            self._lock_color_scale = True
+            self._locked_vmin = float(vmin)
+            self._locked_vmax = float(vmax)
+            if self._lock_btn:
+                self._lock_btn.label.set_text('Unlock')
+            if self.logger:
+                self.logger.info(f"Color scale lock enabled: vmin={self._locked_vmin:.3e}, vmax={self._locked_vmax:.3e}")
+        
         self.canvas.draw_idle()
 
     def _attach_colorbar_controls(self, colorbar: object) -> None:
@@ -576,6 +816,8 @@ class WavePlotApp(tk.Tk):
             cb_ax = colorbar.ax
             pos = cb_ax.get_position()
         except Exception:
+            if self.logger:
+                self.logger.debug("Failed to attach colorbar controls: colorbar.ax not available", exc_info=True)
             return
         # Dimensions in figure fraction
         pad = 0.005
@@ -601,8 +843,16 @@ class WavePlotApp(tk.Tk):
             if not text:
                 return
             try:
-                self._apply_clim(vmax=float(text), apply_if_empty=False)
+                vmax_val = float(text)
+                self._apply_clim(vmax=vmax_val, apply_if_empty=False)
+                # Update locked value if lock is enabled
+                if self._lock_color_scale:
+                    self._locked_vmax = vmax_val
+                    if self.logger:
+                        self.logger.debug(f"Updated locked vmax: {vmax_val:.3e}")
             except ValueError:
+                if self.logger:
+                    self.logger.warning(f"Invalid Max value entered: {text}")
                 messagebox.showerror("WavePlot", "Invalid Max value.")
 
         def _submit_vmin(text: str) -> None:
@@ -610,8 +860,16 @@ class WavePlotApp(tk.Tk):
             if not text:
                 return
             try:
-                self._apply_clim(vmin=float(text), apply_if_empty=False)
+                vmin_val = float(text)
+                self._apply_clim(vmin=vmin_val, apply_if_empty=False)
+                # Update locked value if lock is enabled
+                if self._lock_color_scale:
+                    self._locked_vmin = vmin_val
+                    if self.logger:
+                        self.logger.debug(f"Updated locked vmin: {vmin_val:.3e}")
             except ValueError:
+                if self.logger:
+                    self.logger.warning(f"Invalid Min value entered: {text}")
                 messagebox.showerror("WavePlot", "Invalid Min value.")
 
         self._vmax_box.on_submit(_submit_vmax)
@@ -626,6 +884,14 @@ class WavePlotApp(tk.Tk):
         self._cb_widget_axes.append(auto_ax)
         self._auto_btn = Button(auto_ax, 'Auto')
         self._auto_btn.on_clicked(lambda _evt: self._auto_clim())
+        
+        # Lock button placed to the right of Auto button
+        lock_btn_x = min(btn_x + btn_w + pad, 0.98 - btn_w)
+        lock_ax = self.figure.add_axes([lock_btn_x, btn_y, btn_w, btn_h])
+        self._cb_widget_axes.append(lock_ax)
+        lock_btn_text = 'Unlock' if self._lock_color_scale else 'Lock'
+        self._lock_btn = Button(lock_ax, lock_btn_text)
+        self._lock_btn.on_clicked(lambda _evt: self._toggle_color_scale_lock())
 
     def _write_metadata(self, text: str) -> None:
         self.meta_text.configure(state=tk.NORMAL)
@@ -638,6 +904,12 @@ class WavePlotApp(tk.Tk):
         self.meta_text.delete('1.0', tk.END)
         self.meta_text.insert(tk.END, message)
         self.meta_text.configure(state=tk.DISABLED)
+
+    def _on_closing(self) -> None:
+        """Handle application shutdown."""
+        if self.logger:
+            self.logger.info("WavePlot application shutting down")
+        self.destroy()
 
 
 def _snapshot_metadata(record: SnapMapRecord) -> str:
@@ -668,8 +940,17 @@ def _dump_metadata(record: DumpMapRecord) -> str:
     )
 
 
-def launch(map_path: Optional[str] = None) -> None:
-    app = WavePlotApp(map_path)
+def launch(map_path: Optional[str] = None, debug: bool = False) -> None:
+    """Launch the WavePlot GUI application.
+    
+    This is the main entry point for the GUI. Creates and runs the application
+    window, optionally loading a project file on startup.
+    
+    Args:
+        map_path: Optional path to a .map file to load on startup
+        debug: If True, enable debug logging
+    """
+    app = WavePlotApp(map_path, debug=debug)
     app.mainloop()
 
 

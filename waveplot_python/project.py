@@ -1,4 +1,9 @@
-"""High level project orchestration for the WavePlot Python port."""
+"""High level project orchestration for the WavePlot Python port.
+
+This module provides the WaveProject class, which serves as the main interface for
+working with WAVE datasets. It combines map parsing, data loading, geometry handling,
+and formula evaluation capabilities into a unified API.
+"""
 
 from __future__ import annotations
 
@@ -11,7 +16,8 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-try:  # optional band-pass support
+# Optional SciPy support for Butterworth filtering in formula evaluation
+try:
     from scipy.signal import butter, filtfilt, lfilter  # type: ignore
     _SCIPY_AVAILABLE = True
 except Exception:  # pragma: no cover - SciPy optional
@@ -31,6 +37,14 @@ from .geometry_loader import GeometryData, GeometryLoader, GeometryOverlay
 
 @dataclass
 class FormulaResult:
+    """Result of evaluating a history formula.
+    
+    Attributes:
+        axis: Time or frequency axis array (depending on formula operations)
+        values: Computed values array
+        axis_label: Label for the axis (e.g., "time (s)" or "frequency (Hz)")
+        description: Human-readable description of the formula/operation
+    """
     axis: np.ndarray
     values: np.ndarray
     axis_label: str
@@ -38,40 +52,76 @@ class FormulaResult:
 
 
 class _SafeEvaluator(ast.NodeVisitor):
+    """AST node visitor that validates formula expressions for safety.
+    
+    This class restricts formula evaluation to only allow safe mathematical
+    operations, preventing code injection through malicious formula strings.
+    Only basic arithmetic, function calls, and variable references are allowed.
+    """
+    # Whitelist of allowed AST node types for safe expression evaluation
     _ALLOWED_NODES = (
-        ast.Expression,
-        ast.UnaryOp,
-        ast.BinOp,
-        ast.Call,
-        ast.Name,
-        ast.Load,
-        ast.Add,
-        ast.Sub,
-        ast.Mult,
-        ast.Div,
-        ast.Pow,
-        ast.Mod,
-        ast.USub,
-        ast.UAdd,
-        ast.Constant,
-        ast.Tuple,
-        ast.List,
+        ast.Expression,  # Top-level expression
+        ast.UnaryOp,      # Unary operators (-, +)
+        ast.BinOp,        # Binary operators (+, -, *, /, **, %)
+        ast.Call,         # Function calls
+        ast.Name,         # Variable names
+        ast.Load,         # Load context
+        ast.Add,          # Addition operator
+        ast.Sub,          # Subtraction operator
+        ast.Mult,         # Multiplication operator
+        ast.Div,          # Division operator
+        ast.Pow,          # Power operator
+        ast.Mod,          # Modulo operator
+        ast.USub,         # Unary minus
+        ast.UAdd,         # Unary plus
+        ast.Constant,     # Constants (numbers, strings)
+        ast.Tuple,        # Tuples
+        ast.List,         # Lists
     )
 
     def generic_visit(self, node: ast.AST) -> None:
+        """Visit AST node and validate it's in the allowed set.
+        
+        Raises:
+            ValueError: If node type is not in the allowed whitelist
+        """
         if not isinstance(node, self._ALLOWED_NODES):
             raise ValueError(f"Unsupported expression element: {ast.dump(node)}")
         super().generic_visit(node)
 
 
 class WaveProject:
-    """Loads Turbo Pascal WAVE datasets and exposes plotting-friendly helpers."""
+    """Main interface for loading and working with Turbo Pascal WAVE datasets.
+    
+    This class provides a high-level API for accessing WAVE project data. It handles
+    parsing the .map file, loading binary data files, managing geometry overlays, and
+    evaluating history formulas. All data is returned as NumPy arrays for easy plotting.
+    
+    Example:
+        >>> project = WaveProject("path/to/project.map")
+        >>> snapshots = project.snapshot_records()
+        >>> data = project.snapshot_array(0)  # Load first snapshot
+        >>> time, values, record = project.history_series(0)  # Load first history
+    """
 
     def __init__(self, map_path: str) -> None:
+        """Initialize a WaveProject from a .map file.
+        
+        Args:
+            map_path: Path to the .map file for this WAVE project
+            
+        Raises:
+            FileNotFoundError: If the map file doesn't exist
+            MapParseError: If the map file cannot be parsed
+        """
         self.map_path = os.path.abspath(map_path)
+        # Parse the map file to get record metadata
         self.wave_map: WaveMap = parse_map(self.map_path)
+        # Initialize data loader for reading binary files
         self.loader = WaveDataLoader(self.wave_map)
+        # Initialize geometry loader for geometry overlays
         self._geometry_loader = GeometryLoader(self.wave_map)
+        # Build lookup table: (gnum, gid) -> geometry index
         self._geometry_lookup: Dict[Tuple[int, int], int] = {
             (geom.gnum, geom.gid): idx for idx, geom in enumerate(self.wave_map.geometries)
         }
@@ -79,35 +129,90 @@ class WaveProject:
     # Metadata helpers -----------------------------------------------------
 
     def snapshot_records(self) -> List[SnapMapRecord]:
+        """Get all snapshot records from the project.
+        
+        Returns:
+            List of snapshot record objects containing metadata
+        """
         return self.wave_map.snapshots
 
     def history_records(self) -> List[HistMapRecord]:
+        """Get all history records from the project.
+        
+        Returns:
+            List of history record objects containing metadata
+        """
         return self.wave_map.histories
 
     def dump_records(self) -> List[DumpMapRecord]:
+        """Get all dump records from the project.
+        
+        Returns:
+            List of dump record objects containing metadata
+        """
         return self.wave_map.dumps
 
     def files_present(self) -> Dict[str, bool]:
+        """Check which binary data files are available.
+        
+        Returns:
+            Dictionary mapping file extensions to availability booleans
+        """
         return self.loader.available_files()
 
     # Data access ----------------------------------------------------------
 
     def snapshot_array(self, index: int, *, max_points: Optional[int] = None) -> np.ndarray:
+        """Load snapshot data as a 2D numpy array.
+        
+        Args:
+            index: 0-based index into the snapshots list
+            max_points: Optional maximum points per dimension for downsampling
+            
+        Returns:
+            2D numpy array of shape (x_qty, y_qty) with float32 values
+        """
         record = self.wave_map.snapshots[index]
         return self.loader.load_snapshot(record, max_points=max_points)
 
     def history_series(self, index: int) -> Tuple[np.ndarray, np.ndarray, HistMapRecord]:
+        """Load history data as time series.
+        
+        Args:
+            index: 0-based index into the histories list
+            
+        Returns:
+            Tuple of (time_axis, values, record) where:
+            - time_axis: 1D array of time values in seconds
+            - values: 1D array of history values
+            - record: History record metadata
+        """
         record = self.wave_map.histories[index]
         values = self.loader.load_history(record)
         axis = self.loader.time_axis(record)
         return axis, values, record
 
     def dump_volume(self, index: int) -> Tuple[np.ndarray, DumpMapRecord]:
+        """Load dump volume data.
+        
+        Args:
+            index: 0-based index into the dumps list
+            
+        Returns:
+            Tuple of (volume, record) where:
+            - volume: 4D numpy array of shape (k_qty, i_qty, j_qty, v_qty)
+            - record: Dump record metadata
+        """
         record = self.wave_map.dumps[index]
         volume = self.loader.load_dump(record)
         return volume, record
 
     def geometry_records(self) -> List[GeomMapRecord]:
+        """Get all geometry records from the project.
+        
+        Returns:
+            List of geometry record objects containing metadata
+        """
         return self.wave_map.geometries
 
     def snapshot_geometry_overlay(self, index: int) -> GeometryOverlay:
@@ -153,6 +258,15 @@ class WaveProject:
         return self._build_geometry_overlay(geometry, plane_axes, axis_ranges)
 
     def _geometry_record_for_ids(self, gnum: int, gid: int) -> Optional[GeomMapRecord]:
+        """Find geometry record matching the given geometry number and ID.
+        
+        Args:
+            gnum: Geometry number
+            gid: Geometry ID
+            
+        Returns:
+            Matching GeomMapRecord or None if not found
+        """
         idx = self._geometry_lookup.get((gnum, gid))
         if idx is None:
             return None
@@ -162,6 +276,16 @@ class WaveProject:
 
     @staticmethod
     def _canonical_axis(axis: str) -> str:
+        """Convert axis name to canonical form (i, j, k).
+        
+        Converts 'x'->'i', 'y'->'j', 'z'->'k', otherwise returns lowercase.
+        
+        Args:
+            axis: Axis character or name
+            
+        Returns:
+            Canonical axis character ('i', 'j', or 'k')
+        """
         mapping = {'x': 'i', 'y': 'j', 'z': 'k'}
         return mapping.get(axis.lower(), axis.lower())
 
@@ -271,7 +395,21 @@ class WaveProject:
         selection: Sequence[int],
         formula: str,
     ) -> FormulaResult:
-        """Evaluate Pascal-style history formula across the selected histories."""
+        """Evaluate Pascal-style history formula across the selected histories.
+        Lets users combine histories with math operations, integrals, derivatives, FFT magnitude/phase
+        and a Butterworth filter (needs SciPy to be installed).
+
+        Parameters:
+        - selection: Sequence of history indices to evaluate the formula on
+        - formula: Pascal-style formula string containing history references [1], [2], ...
+
+        Returns:
+        - FormulaResult containing the evaluated formula values, axis, and description
+
+        Raises:
+        - ValueError: If no histories are selected or if the selected histories do not share the same time axis
+
+        """
         if not selection:
             raise ValueError("No histories selected for formula evaluation")
         histories = [self.history_series(idx) for idx in selection]
@@ -304,7 +442,16 @@ class WaveProject:
 
 
 def _convert_formula(formula: str) -> str:
-    """Convert Pascal-style tokens [n] to pythonic h{n}."""
+    """Convert Pascal-style formula syntax to Python variable names.
+    
+    Converts history references like [1], [2] to h1, h2 for Python evaluation.
+    
+    Args:
+        formula: Formula string with Pascal-style history references
+        
+    Returns:
+        Converted formula string with Python variable names
+    """
     def repl(match: re.Match[str]) -> str:
         idx = match.group(1)
         return f"h{idx}"
@@ -314,13 +461,36 @@ def _convert_formula(formula: str) -> str:
 
 
 class _FormulaContext:
+    """Context manager for formula evaluation providing functions and axis handling.
+    
+    This class provides the evaluation context for history formulas, including
+    mathematical functions (integral, derivative, FFT, filtering) and manages
+    axis labels (time vs frequency) based on operations performed.
+    """
     def __init__(self, dt: float, time_axis: np.ndarray) -> None:
+        """Initialize formula context.
+        
+        Args:
+            dt: Time step between samples (seconds)
+            time_axis: Time axis array
+        """
         self.dt = dt
         self.time_axis = time_axis
         self.axis_label = "time (s)"
-        self._spectrum_mode = False
+        self._spectrum_mode = False  # Set to True if FFT operations are used
 
     def functions(self) -> Dict[str, object]:
+        """Get dictionary of available functions for formula evaluation.
+        
+        Returns:
+            Dictionary mapping function names to callable objects:
+            - 'I': Integration (cumulative sum)
+            - 'D': Derivative (gradient)
+            - 'F': FFT magnitude
+            - 'P': FFT phase
+            - 't': Butterworth band-pass filter
+            - 'ABS', 'SQRT', 'LOG', 'EXP': Standard math functions
+        """
         return {
             'I': self.integrate,
             'D': self.derivative,
@@ -334,17 +504,53 @@ class _FormulaContext:
         }
 
     def integrate(self, series: np.ndarray) -> np.ndarray:
+        """Compute cumulative integral of a time series.
+        
+        Args:
+            series: Input time series array
+            
+        Returns:
+            Cumulative integral array (same length as input)
+        """
         return np.cumsum(series) * self.dt
 
     def derivative(self, series: np.ndarray) -> np.ndarray:
+        """Compute derivative of a time series using gradient.
+        
+        Args:
+            series: Input time series array
+            
+        Returns:
+            Derivative array (same length as input)
+        """
         return np.gradient(series, self.dt, edge_order=2)
 
     def fft_magnitude(self, series: np.ndarray) -> np.ndarray:
+        """Compute FFT magnitude spectrum of a time series.
+        
+        Switches axis to frequency domain. Uses real FFT (rfft) for efficiency.
+        
+        Args:
+            series: Input time series array
+            
+        Returns:
+            Magnitude spectrum array (length = len(series)//2 + 1)
+        """
         self._spectrum_mode = True
         spectrum = np.fft.rfft(series)
         return np.abs(spectrum)
 
     def fft_phase(self, series: np.ndarray) -> np.ndarray:
+        """Compute FFT phase spectrum of a time series.
+        
+        Switches axis to frequency domain. Uses real FFT (rfft) for efficiency.
+        
+        Args:
+            series: Input time series array
+            
+        Returns:
+            Phase spectrum array in radians (length = len(series)//2 + 1)
+        """
         self._spectrum_mode = True
         spectrum = np.fft.rfft(series)
         return np.angle(spectrum)
@@ -415,7 +621,18 @@ class _FormulaContext:
         return lfilter(b, a, series)
 
     def axis_for_result(self, values: np.ndarray) -> np.ndarray:
+        """Get the appropriate axis array for the result.
+        
+        Returns frequency axis if FFT operations were used, otherwise time axis.
+        
+        Args:
+            values: Result values array (used to determine length)
+            
+        Returns:
+            Time or frequency axis array
+        """
         if self._spectrum_mode:
+            # Generate frequency axis for FFT results
             freq = np.fft.rfftfreq(len(self.time_axis), d=self.dt if self.dt else 1.0)
             self.axis_label = "frequency (Hz)"
             return freq.astype(np.float32)
@@ -423,6 +640,16 @@ class _FormulaContext:
 
 
 def _ensure_1d(value: object) -> np.ndarray:
+    """Ensure value is a 1D numpy array.
+    
+    Converts scalars and multi-dimensional arrays to 1D arrays.
+    
+    Args:
+        value: Input value (scalar, array, or array-like)
+        
+    Returns:
+        1D numpy array of float32
+    """
     array = np.asarray(value, dtype=np.float32)
     if array.ndim == 0:
         array = array.reshape(1)

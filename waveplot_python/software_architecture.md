@@ -4,10 +4,10 @@ This document sketches the high-level organisation of the WavePlot Python versio
 
 ## Goals
 
-- Load the legacy WAVE simulation outputs (`.map`, `.snp`, `.hst`, `.dmp`, `.geo`, etc.).
+- Load the WAVE simulation outputs (`.map`, `.snp`, `.hst`, `.dmp`, `.geo`, etc.).
 - Provide a desktop GUI for browsing snapshots, histories, dumps, geometry overlays, and derived plots.
 
-## Package Layout
+## Code Layout
 
 ```
 waveplot_python/

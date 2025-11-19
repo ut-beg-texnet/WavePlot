@@ -14,8 +14,10 @@ if __package__ in {None, ""}:
     if package_root not in sys.path:
         sys.path.insert(0, package_root)
     from waveplot_python import launch  # type: ignore
+    from waveplot_python.logger import setup_logging  # type: ignore
 else:
     from . import launch
+    from .logger import setup_logging
 
 
 def main() -> None:
@@ -25,12 +27,21 @@ def main() -> None:
         nargs="?",
         help="Optional path to a .map file to load on startup",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug logging to waveplot_python/logs/waveplot_debug.log",
+    )
     args = parser.parse_args()
+    
+    # Set up logging if debug flag is enabled
+    setup_logging(debug=args.debug)
+    
     map_path = None
     if args.map_file:
         path = Path(args.map_file)
         map_path = str(path.expanduser())
-    launch(map_path)
+    launch(map_path, debug=args.debug)
 
 
 if __name__ == "__main__":
