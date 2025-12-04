@@ -875,19 +875,24 @@ class WavePlotApp(tk.Tk):
         self._vmax_box.on_submit(_submit_vmax)
         self._vmin_box.on_submit(_submit_vmin)
 
-        # Auto button placed to the right of the colorbar, vertically centered
+        # Auto and Lock buttons placed to the right of the colorbar, stacked vertically
         btn_w = 0.05
         btn_h = 0.04
         btn_x = min(pos.x1 + pad, 0.98 - btn_w)
-        btn_y = (pos.y0 + pos.y1) / 2 - btn_h / 2
-        auto_ax = self.figure.add_axes([btn_x, btn_y, btn_w, btn_h])
+        # Calculate center of colorbar for vertical centering of button stack
+        center_y = (pos.y0 + pos.y1) / 2
+        # Stack height: 2 buttons + 1 gap between them
+        stack_height = 2 * btn_h + pad
+        # Auto button (top): center + half stack height - button height
+        auto_btn_y = center_y + stack_height / 2 - btn_h
+        auto_ax = self.figure.add_axes([btn_x, auto_btn_y, btn_w, btn_h])
         self._cb_widget_axes.append(auto_ax)
         self._auto_btn = Button(auto_ax, 'Auto')
         self._auto_btn.on_clicked(lambda _evt: self._auto_clim())
         
-        # Lock button placed to the right of Auto button
-        lock_btn_x = min(btn_x + btn_w + pad, 0.98 - btn_w)
-        lock_ax = self.figure.add_axes([lock_btn_x, btn_y, btn_w, btn_h])
+        # Lock button (bottom): center - half stack height
+        lock_btn_y = center_y - stack_height / 2
+        lock_ax = self.figure.add_axes([btn_x, lock_btn_y, btn_w, btn_h])
         self._cb_widget_axes.append(lock_ax)
         lock_btn_text = 'Unlock' if self._lock_color_scale else 'Lock'
         self._lock_btn = Button(lock_ax, lock_btn_text)
