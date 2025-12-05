@@ -167,11 +167,19 @@ class WavePlotApp(tk.Tk):
 
         self.export_hist_button = ttk.Button(
             self.tree_frame,
-            text="Export Histogram Data CSV",
+            text="Export All Histogram Data CSV",
             command=self._export_histories_csv,
             state=tk.DISABLED,
         )
         self.export_hist_button.pack(fill=tk.X, pady=(4, 0))
+
+        self.export_selected_hist_button = ttk.Button(
+            self.tree_frame,
+            text="Export Selected Histogram Data CSV",
+            command=self._export_selected_histories_csv,
+            state=tk.DISABLED,
+        )
+        self.export_selected_hist_button.pack(fill=tk.X, pady=(4, 0))
 
     def _build_detail_panel(self) -> None:
         """Build the detail/plotting panel.
@@ -323,8 +331,10 @@ class WavePlotApp(tk.Tk):
             hist_count += 1
         if hist_count > 0:
             self.export_hist_button.configure(state=tk.NORMAL)
+            self.export_selected_hist_button.configure(state=tk.NORMAL)
         else:
             self.export_hist_button.configure(state=tk.DISABLED)
+            self.export_selected_hist_button.configure(state=tk.DISABLED)
         dumps_node = self.tree.insert('', 'end', text='Dumps')
         dump_count = 0
         for rec in self.project.dump_records():
@@ -993,6 +1003,81 @@ class WavePlotApp(tk.Tk):
         if self.logger:
             self.logger.info(f"Histories exported to CSV: {path}")
         messagebox.showinfo("WavePlot", f"Histogram data exported to:\n{path}")
+
+    def _export_selected_histories_csv(self) -> None:
+        """Export only the currently selected histories to a CSV file."""
+        if not self.project:
+            messagebox.showinfo("WavePlot", "Load a project before exporting histories.")
+            return
+
+        selection = [item for item in self.tree.selection() if item in self._tree_map]
+        if not selection:
+            messagebox.showwarning("WavePlot", "No histories selected for export.")
+            return
+
+        types = {self._tree_map[item][0] for item in selection}
+        if len(types) != 1 or 'hist' not in types:
+            messagebox.showwarning("WavePlot", "Please select histories only to export.")
+            return
+
+        hist_indices = sorted(self._tree_map[item][1] for item in selection)
+        if self.logger:
+            self.logger.info(f"Exporting selected histories to CSV: {hist_indices}")
+
+        time_axes: List[np.ndarray] = []
+        values_list: List[np.ndarray] = []
+        headers: List[str] = []
+
+        try:
+            for idx in hist_indices:
+                axis, values, record = self.project.history_series(idx)
+                time_axes.append(np.asarray(axis, dtype=np.float64))
+                values_list.append(np.asarray(values, dtype=np.float64))
+                headers.append(f"hist_{record.index}_{record.variable}")
+
+            union_times = np.unique(np.concatenate(time_axes))
+            union_times.sort()
+            data_matrix = np.full((len(union_times), len(values_list)), np.nan, dtype=np.float64)
+
+            for col, (axis, vals) in enumerate(zip(time_axes, values_list)):
+                positions = np.searchsorted(union_times, axis)
+                valid_mask = (positions >= 0) & (positions < len(union_times)) & (union_times[positions] == axis)
+                data_matrix[positions[valid_mask], col] = vals[valid_mask]
+        except Exception as exc:
+            if self.logger:
+                self.logger.error("Failed to prepare selected history data for export", exc_info=True)
+            messagebox.showerror("WavePlot", f"Failed to prepare history data:\n{exc}")
+            return
+
+        path = filedialog.asksaveasfilename(
+            title="Export selected histogram CSV",
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+        )
+        if not path:
+            if self.logger:
+                self.logger.info("Selected CSV export cancelled by user")
+            return
+
+        try:
+            with open(path, "w", newline="", encoding="utf-8") as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(["time"] + headers)
+                for row_idx, t in enumerate(union_times):
+                    row = [f"{t:.9g}"]
+                    for col_idx in range(data_matrix.shape[1]):
+                        val = data_matrix[row_idx, col_idx]
+                        row.append("" if np.isnan(val) else f"{val:.9g}")
+                    writer.writerow(row)
+        except Exception as exc:
+            if self.logger:
+                self.logger.error("Failed to write selected CSV export", exc_info=True)
+            messagebox.showerror("WavePlot", f"Failed to write CSV:\n{exc}")
+            return
+
+        if self.logger:
+            self.logger.info(f"Selected histories exported to CSV: {path}")
+        messagebox.showinfo("WavePlot", f"Selected histogram data exported to:\n{path}")
 
     def _on_closing(self) -> None:
         """Handle application shutdown."""
