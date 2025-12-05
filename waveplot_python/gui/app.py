@@ -8,6 +8,7 @@ various colormaps, overlay geometry, and evaluate history formulas.
 from __future__ import annotations
 
 import os
+import csv
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog
 from typing import Dict, List, Optional, Tuple
@@ -164,6 +165,14 @@ class WavePlotApp(tk.Tk):
         )
         self.filter_button.pack(fill=tk.X, pady=(4, 0))
 
+        self.export_hist_button = ttk.Button(
+            self.tree_frame,
+            text="Export Histogram Data CSV",
+            command=self._export_histories_csv,
+            state=tk.DISABLED,
+        )
+        self.export_hist_button.pack(fill=tk.X, pady=(4, 0))
+
     def _build_detail_panel(self) -> None:
         """Build the detail/plotting panel.
         
@@ -312,6 +321,10 @@ class WavePlotApp(tk.Tk):
             node = self.tree.insert(hists_node, 'end', text=desc)
             self._tree_map[node] = ('hist', rec.index - 1)
             hist_count += 1
+        if hist_count > 0:
+            self.export_hist_button.configure(state=tk.NORMAL)
+        else:
+            self.export_hist_button.configure(state=tk.DISABLED)
         dumps_node = self.tree.insert('', 'end', text='Dumps')
         dump_count = 0
         for rec in self.project.dump_records():
@@ -909,6 +922,77 @@ class WavePlotApp(tk.Tk):
         self.meta_text.delete('1.0', tk.END)
         self.meta_text.insert(tk.END, message)
         self.meta_text.configure(state=tk.DISABLED)
+
+    def _export_histories_csv(self) -> None:
+        """Export all loaded histories to a CSV file with time as the first column."""
+        if not self.project:
+            messagebox.showinfo("WavePlot", "Load a project before exporting histories.")
+            return
+
+        hist_records = self.project.history_records()
+        if not hist_records:
+            messagebox.showinfo("WavePlot", "No histories available to export.")
+            return
+
+        if self.logger:
+            self.logger.info(f"Exporting {len(hist_records)} histories to CSV")
+
+        # Gather time/value arrays for alignment on the exact time stamps present
+        time_axes: List[np.ndarray] = []
+        values_list: List[np.ndarray] = []
+        headers: List[str] = []
+
+        try:
+            for idx, rec in enumerate(hist_records):
+                axis, values, record = self.project.history_series(idx)
+                time_axes.append(np.asarray(axis, dtype=np.float64))
+                values_list.append(np.asarray(values, dtype=np.float64))
+                headers.append(f"hist_{record.index}_{record.variable}")
+
+            union_times = np.unique(np.concatenate(time_axes))
+            union_times.sort()
+            data_matrix = np.full((len(union_times), len(values_list)), np.nan, dtype=np.float64)
+
+            for col, (axis, vals) in enumerate(zip(time_axes, values_list)):
+                positions = np.searchsorted(union_times, axis)
+                # Ensure we only assign where the union time matches the rounded axis
+                valid_mask = (positions >= 0) & (positions < len(union_times)) & (union_times[positions] == axis)
+                data_matrix[positions[valid_mask], col] = vals[valid_mask]
+        except Exception as exc:
+            if self.logger:
+                self.logger.error("Failed to prepare history data for export", exc_info=True)
+            messagebox.showerror("WavePlot", f"Failed to prepare history data:\n{exc}")
+            return
+
+        path = filedialog.asksaveasfilename(
+            title="Export histogram CSV",
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+        )
+        if not path:
+            if self.logger:
+                self.logger.info("CSV export cancelled by user")
+            return
+
+        try:
+            with open(path, "w", newline="", encoding="utf-8") as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(["time"] + headers)
+                for row_idx, t in enumerate(union_times):
+                    row = [f"{t:.9g}"]
+                    for col_idx in range(data_matrix.shape[1]):
+                        val = data_matrix[row_idx, col_idx]
+                        row.append("" if np.isnan(val) else f"{val:.9g}")
+                    writer.writerow(row)
+        except Exception as exc:
+            if self.logger:
+                self.logger.error("Failed to write CSV export", exc_info=True)
+            messagebox.showerror("WavePlot", f"Failed to write CSV:\n{exc}")
+            return
+
+        if self.logger:
+            self.logger.info(f"Histories exported to CSV: {path}")
+        messagebox.showinfo("WavePlot", f"Histogram data exported to:\n{path}")
 
     def _on_closing(self) -> None:
         """Handle application shutdown."""

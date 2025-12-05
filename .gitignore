@@ -3,6 +3,9 @@ waveplot_venv/
 
 logs/
 
+# cursor directory
+.cursor/
+
 
 # Common gitignore files
 *.log

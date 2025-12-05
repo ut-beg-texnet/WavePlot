@@ -7,7 +7,7 @@ WavePlot is a Python-based waveform plotting and analysis tool for WAVE simulati
 ### Prerequisites
 
 - Python 3.7 or higher
-- pip (bundled with Python)
+- pip
 - The dependencies listed in `requirements.txt` (`tkinter` ships with Python on Windows/macOS; Linux distributions may package it separately)
 
 ### Quick setup
@@ -28,7 +28,6 @@ python -m waveplot_python.main [path\to\project.map]
 ```
 
 Passing a `.map` path preloads the project; omit it to open files later via `File -> Open .map...`. You can also launch with `python waveplot_python/main.py`.
-
 
 ## Additional documentation
 
