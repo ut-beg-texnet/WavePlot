@@ -15,6 +15,7 @@ from typing import Dict, List, Optional, Tuple
 
 from matplotlib import cm
 from matplotlib import patches
+from matplotlib import animation as mpl_animation
 import numpy as np
 from matplotlib.widgets import TextBox, Button
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
@@ -101,6 +102,8 @@ class WavePlotApp(tk.Tk):
         self._locked_vmin: Optional[float] = None
         self._locked_vmax: Optional[float] = None
         self._lock_btn: Optional[Button] = None
+        # Animation handle (kept to avoid garbage collection)
+        self._current_animation: Optional[mpl_animation.FuncAnimation] = None
 
         if self.logger:
             self.logger.info("WavePlot application starting")
@@ -148,6 +151,22 @@ class WavePlotApp(tk.Tk):
         )
         self.tree.pack(fill=tk.BOTH, expand=True)
         self.tree.bind('<<TreeviewSelect>>', self._on_tree_select)
+
+        self.play_snap_btn = ttk.Button(
+            self.tree_frame,
+            text="Play Snapshots",
+            command=self._open_snapshot_animation_dialog,
+            state=tk.DISABLED,
+        )
+        self.play_snap_btn.pack(fill=tk.X, pady=(8, 0))
+
+        self.stop_snap_btn = ttk.Button(
+            self.tree_frame,
+            text="Stop Animation",
+            command=self._stop_animation,
+            state=tk.DISABLED,
+        )
+        self.stop_snap_btn.pack(fill=tk.X, pady=(4, 0))
 
         self.formula_button = ttk.Button(
             self.tree_frame,
@@ -348,6 +367,11 @@ class WavePlotApp(tk.Tk):
         self.tree.item(snaps_node, open=True)
         self.tree.item(hists_node, open=True)
         self.tree.item(dumps_node, open=False)
+        # Enable/disable snapshot animation control
+        if snap_count > 0:
+            self.play_snap_btn.configure(state=tk.NORMAL)
+        else:
+            self.play_snap_btn.configure(state=tk.DISABLED)
         if self.logger:
             self.logger.debug(f"Populated tree: {snap_count} snapshots, {hist_count} histories, {dump_count} dumps")
 
@@ -667,6 +691,352 @@ class WavePlotApp(tk.Tk):
         self.axes.set_title("Derived history")
         self._write_metadata(f"Formula: {result.description}\nSamples: {len(result.values)}")
         self.canvas.draw_idle()
+
+
+    def _ask_for_variable_dialog(self, variables: List[str]) -> Optional[str]:
+        """
+        Modal radio-button dialog for choosing which variable to use for snapshot animation.
+
+        Args:
+            variables: List of available variable names
+
+        Returns:
+            Selected variable name if user selects one, None if user cancels the dialog
+        """
+        if not variables:
+            return None
+        
+        dialog = tk.Toplevel(self)
+        dialog.title("Select Variable")
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+
+        # Default to first variable
+        choice_var = tk.StringVar(value=variables[0])
+
+        body = ttk.Frame(dialog, padding=12)
+        body.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(body, text="Select variable for animation:").pack(anchor="w")
+
+        # Create radio buttons for each variable
+        for var in variables:
+            ttk.Radiobutton(
+                body,
+                text=var,
+                variable=choice_var,
+                value=var,
+            ).pack(anchor="w", pady=(6, 0))
+
+        result: dict[str, Optional[str]] = {"value": None}
+
+        def on_ok() -> None:
+            result["value"] = choice_var.get()
+            dialog.destroy()
+
+        def on_cancel() -> None:
+            result["value"] = None
+            dialog.destroy()
+
+        btns = ttk.Frame(body, padding=(0, 10, 0, 0))
+        btns.pack(fill=tk.X)
+
+        ttk.Button(btns, text="OK", command=on_ok).pack(side=tk.LEFT)
+        ttk.Button(btns, text="Cancel", command=on_cancel).pack(side=tk.RIGHT, padx=(6, 0))
+
+        dialog.protocol("WM_DELETE_WINDOW", on_cancel)
+        dialog.bind("<Return>", lambda _e: on_ok())
+        dialog.bind("<Escape>", lambda _e: on_cancel())
+
+        # Center the dialog on the screen over the parent window
+        dialog.update_idletasks()
+        x = self.winfo_rootx() + (self.winfo_width() // 2) - (dialog.winfo_width() // 2)
+        y = self.winfo_rooty() + (self.winfo_height() // 2) - (dialog.winfo_height() // 2)
+        dialog.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+
+        self.wait_window(dialog)
+        return result["value"]
+
+    # CURRENTLY NOT BEING USED SINCE WE USE THE MEDIAN MIN/MAX FOR THE COLOR SCALE
+    def _ask_for_scale_mode_dialog(self) -> Optional[str]:
+        """
+        Modal radio-button dialog for choosing what snapshot color scale mode to use for the animation
+
+        Returns:
+            "global" or "frame" if user selects one of the options, None if user cancels the dialog or closes the window
+
+        """
+        dialog = tk.Toplevel(self)
+        dialog.title("Snapshot Animation")
+        dialog.transient(self) # sets a transient relationship between this dialog and the parent window (which is the main window)
+        dialog.grab_set() # makes the dialog modal (blocks input to other windows until it is closed)
+        dialog.resizable(False, False) # prevents the dialog from being resized
+
+        # we want the default option to be "global"
+        choice_var = tk.StringVar(value="global")
+
+        body = ttk.Frame(dialog, padding=12)
+        body.pack(fill=tk.BOTH, expand=True) # fills the dialog with the body frame
+
+        ttk.Label(body, text="Color scale mode:").pack(anchor="w") # label for the radio buttons
+
+        # global scaling option
+        ttk.Radiobutton(
+            body,
+            text="Global: One min/max across selected/all snapshots",
+            variable=choice_var,
+            value="global",
+        ).pack(anchor="w", pady=(6, 0)) # pack the radio button into the body frame with some vertical padding
+
+        # frame scaling option
+        ttk.Radiobutton(
+            body,
+            text="Frame: Auto-scale each frame",
+            variable=choice_var,
+            value="frame",
+        ).pack(anchor="w", pady=(4, 0)) # pack the radio button into the body frame with some vertical padding
+
+        result: dict[str, Optional[str]] = {"value": None}
+
+        # callbacks for the OK and Cancel buttons
+        def on_ok() -> None:
+            result["value"] = choice_var.get()
+            dialog.destroy()
+
+        def on_cancel() -> None:
+            result["value"] = None
+            dialog.destroy()
+
+        btns = ttk.Frame(body, padding=(0, 10, 0, 0))
+        btns.pack(fill=tk.X)
+
+        ttk.Button(btns, text="OK", command=on_ok).pack(side=tk.LEFT)
+        ttk.Button(btns, text="Cancel", command=on_cancel).pack(side=tk.RIGHT, padx=(6, 0))
+
+        dialog.protocol("WM_DELETE_WINDOW", on_cancel) # bind the Cancel button to the on_cancel callback
+
+      
+        dialog.bind("<Return>", lambda _e: on_ok()) # if we press Enter on keayboard --> call the on_ok callback --> the user has chosen an option and wants to close the dialog
+        dialog.bind("<Escape>", lambda _e: on_cancel()) # if we press Escape on keayboard --> call the on_cancel callback --> the user has chosen to cancel the dialog
+
+        # center the dialog on the screen over the parent window
+        dialog.update_idletasks() 
+        x = self.winfo_rootx() + (self.winfo_width() // 2) - (dialog.winfo_width() // 2)
+        y = self.winfo_rooty() + (self.winfo_height() // 2) - (dialog.winfo_height() // 2)
+        dialog.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+
+
+        self.wait_window(dialog)
+        return result["value"]
+
+
+
+
+
+    # Snapshot animation ---------------------------------------------------
+
+    def _open_snapshot_animation_dialog(self) -> None:
+        """Collect user options and trigger snapshot animation/export."""
+        # first check if the user has a project loaded
+        if not self.project:
+            messagebox.showinfo("WavePlot", "Load a project before playing snapshots.")
+            return
+        # then check if there are any snapshots available
+        snapshots = self.project.snapshot_records()
+        if not snapshots:
+            messagebox.showinfo("WavePlot", "No snapshots available.")
+            return
+
+        # Determine selection
+        # even if the user want to play all snapshots, we need to get the indices of the selected snapshots before they see the dialog
+        selected_nodes = [item for item in self.tree.selection() if item in self._tree_map]
+        selected_indices = [
+            self._tree_map[item][1]
+            for item in selected_nodes
+            if self._tree_map[item][0] == 'snap'
+        ]
+        indices: List[int]
+        if selected_indices:
+            # Explicit choice between current selection or all snapshots
+            choice = messagebox.askyesnocancel(
+                "WavePlot",
+                "Use only the selected snapshots?\nYes = selected only\nNo = all snapshots\nCancel = abort",
+                parent=self,
+            )
+            if choice is None:
+                return
+            indices = sorted(selected_indices) if choice else list(range(len(snapshots)))
+        else:
+            indices = list(range(len(snapshots)))
+
+        if not indices:
+            messagebox.showinfo("WavePlot", "No snapshots selected to animate.")
+            return
+
+        # Get unique variables from the selected snapshots
+        available_variables = sorted(set(snapshots[idx].variable for idx in indices))
+        if not available_variables:
+            messagebox.showinfo("WavePlot", "No variables found in selected snapshots.")
+            return
+
+        # Ask user to select a variable
+        selected_variable = self._ask_for_variable_dialog(available_variables)
+        if selected_variable is None:
+            return  # User cancelled
+
+        # Filter indices to only include snapshots with the selected variable
+        filtered_indices = [idx for idx in indices if snapshots[idx].variable == selected_variable]
+        if not filtered_indices:
+            messagebox.showinfo("WavePlot", f"No snapshots found with variable '{selected_variable}'.")
+            return
+
+        # Frame rate (set by default to 30 fps)
+        fps = 30
+
+        loop_flag = messagebox.askyesno("Snapshot animation", "Loop playback?", parent=self)
+
+        export_path: Optional[str] = None
+        if messagebox.askyesno("Snapshot animation", "Export to MP4 (requires ffmpeg)?", parent=self):
+            export_path = filedialog.asksaveasfilename(
+                title="Export snapshot animation",
+                defaultextension=".mp4",
+                filetypes=[("MP4 video", "*.mp4"), ("All files", "*.*")],
+            )
+            if not export_path:
+                export_path = None
+
+        try:
+            self._play_snapshots(
+                filtered_indices,
+                fps=float(fps),
+                loop=loop_flag,
+                export_path=export_path,
+            )
+        except Exception as exc:
+            if self.logger:
+                self.logger.error("Snapshot animation failed", exc_info=True)
+            messagebox.showerror("WavePlot", f"Snapshot animation failed:\n{exc}")
+
+    def _play_snapshots(
+        self,
+        indices: List[int],
+        fps: float,
+        loop: bool,
+        export_path: Optional[str],
+    ) -> None:
+        """Render snapshot sequence as an animation and optionally export."""
+        if not self.project:
+            return
+        # Stop any existing animation before starting a new one.
+        self._stop_animation()
+        self._clear_colorbars()
+        self._clear_overlay_artists()
+        self.axes.clear()
+
+        cmap = cm.get_cmap(self._current_cmap.get())
+        arrays: List[np.ndarray] = []
+        records: List[SnapMapRecord] = []
+
+        for idx in indices:
+            record = self.project.snapshot_records()[idx]
+            data = self.project.snapshot_array(idx)
+            arrays.append(data)
+            records.append(record)
+        if not arrays:
+            messagebox.showinfo("WavePlot", "No snapshot frames to animate.")
+            return
+
+        # Use min/max from the median snapshot (middle index)
+        median_idx = len(arrays) // 2
+        median_data = arrays[median_idx]
+        vmin = float(np.nanmin(median_data))
+        vmax = float(np.nanmax(median_data))
+
+        im = self.axes.imshow(
+            arrays[0].T,
+            origin='lower',
+            cmap=cmap,
+            aspect='auto',
+            vmin=vmin,
+            vmax=vmax,
+        )
+        self._image_artist = im
+        colorbar = self.figure.colorbar(im, ax=self.axes, fraction=0.046, pad=0.04)
+        self._colorbars.append(colorbar)
+        self._attach_colorbar_controls(colorbar)
+
+        first_rec = records[0]
+        self.axes.set_title(f"Snapshot #{first_rec.index} {first_rec.variable}")
+        self.axes.set_xlabel(f"{first_rec.ax1}-axis")
+        self.axes.set_ylabel(f"{first_rec.ax2}-axis")
+        self._write_metadata(_snapshot_metadata(first_rec))
+
+        interval_ms = max(int(1000.0 / max(fps, 0.1)), 1)
+
+        def _update(frame_idx: int):
+            frame_data = arrays[frame_idx]
+            im.set_data(frame_data.T)
+            rec = records[frame_idx]
+            self.axes.set_title(f"Snapshot #{rec.index} {rec.variable}")
+            self.canvas.draw_idle()
+            return (im,)
+
+        # Keep reference to avoid garbage collection
+        self._current_animation = mpl_animation.FuncAnimation(
+            self.figure,
+            _update,
+            frames=len(arrays),
+            interval=interval_ms,
+            blit=False,
+            repeat=loop,
+        )
+        self.stop_snap_btn.configure(state=tk.NORMAL)
+        self.canvas.draw_idle()
+
+        if export_path:
+            if self.logger:
+                self.logger.info(f"Exporting snapshot animation to: {export_path}")
+            try:
+                writer = mpl_animation.FFMpegWriter(fps=fps)
+                if not writer.isAvailable():  # type: ignore[attr-defined]
+                    raise RuntimeError("ffmpeg is not available on this system.")
+                self._current_animation.save(export_path, writer=writer)
+                messagebox.showinfo("WavePlot", f"Animation saved to:\n{export_path}")
+            except Exception as exc:
+                if self.logger:
+                    self.logger.error("Failed to export animation", exc_info=True)
+                messagebox.showerror(
+                    "WavePlot",
+                    "Failed to export animation.\n"
+                    "Ensure ffmpeg is installed and accessible from PATH.\n\n"
+                    f"Details:\n{exc}",
+                )
+            else:
+                pass
+
+    def _stop_animation(self) -> None:
+        """Stop any running snapshot animation."""
+        if not self._current_animation:
+            try:
+                self.stop_snap_btn.configure(state=tk.DISABLED)
+            except Exception:
+                pass
+            return
+
+        try:
+            if getattr(self._current_animation, "event_source", None):
+                self._current_animation.event_source.stop()
+        except Exception:
+            pass
+
+        self._current_animation = None
+        try:
+            self.stop_snap_btn.configure(state=tk.DISABLED)
+        except Exception:
+            pass
+        if self.logger:
+            self.logger.info("Snapshot animation stopped by user")
 
     # Helpers --------------------------------------------------------------
 
@@ -1081,6 +1451,8 @@ class WavePlotApp(tk.Tk):
 
     def _on_closing(self) -> None:
         """Handle application shutdown."""
+        # Stop any active animation cleanly.
+        self._stop_animation()
         if self.logger:
             self.logger.info("WavePlot application shutting down")
         self.destroy()
@@ -1092,7 +1464,7 @@ def _snapshot_metadata(record: SnapMapRecord) -> str:
         f"Variable: {record.variable}\n"
         f"Range i: {record.i_range}  j: {record.j_range}  k: {record.k_range}\n"
         f"Resolution: {record.x_qty} x {record.y_qty}\n"
-        f"Time span: {record.time_start:.4f}s -> {record.time_end:.4f}s\n"
+        f"Time span: {record.time_start}s -> {record.time_end}s\n"
         f"Value range: {record.min_val:.3e} .. {record.max_val:.3e}"
     )
 
