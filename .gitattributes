@@ -1,3 +1,26 @@
-* text=auto  
-*.py text eol=lf 
-*.mdc text eol=lf 
+* text=auto
+*.py text eol=lf
+*.mdc text eol=lf
+*.md text eol=lf
+*.toml text eol=lf
+*.js text eol=lf
+*.css text eol=lf
+
+# WAVE / WavePlot binary data and legacy binaries
+*.map binary
+*.MAP binary
+*.snp binary
+*.SNP binary
+*.hst binary
+*.HST binary
+*.dmp binary
+*.DMP binary
+*.geo binary
+*.GEO binary
+*.crk binary
+*.CRK binary
+*.set binary
+*.SET binary
+*.exe binary
+*.EXE binary
+*.nc binary
