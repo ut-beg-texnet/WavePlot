@@ -1,0 +1,29 @@
+/* WavePlot web — global styles (Mantine handles most theming) */
+:root {
+  --wp-accent: var(--mantine-color-indigo-6);
+}
+html, body { height: 100%; }
+.wp-logo { font-weight: 800; font-size: 1.25rem; letter-spacing: -0.02em; user-select: none; }
+.wp-logo-a { color: var(--mantine-color-indigo-6); }
+.wp-logo-b { color: var(--mantine-color-text); }
+.wp-nav-icon { display: inline-block; width: 1.2em; text-align: center; font-size: 1.05rem; opacity: 0.85; }
+.wp-nav-footer { position: absolute; bottom: 12px; left: 12px; right: 12px; }
+.wp-main { min-height: 100vh; }
+.wp-controls { height: calc(100vh - 88px); overflow-y: auto; }
+.wp-graph-wrap { position: relative; }
+.wp-graph { height: calc(100vh - 205px); min-height: 380px; }
+.wp-graph-short { height: calc(100vh - 420px); min-height: 320px; }
+.wp-mono { font-family: var(--mantine-font-family-monospace); font-size: 0.78rem; }
+.wp-kv td:first-child { color: var(--mantine-color-dimmed); padding-right: 12px; white-space: nowrap; }
+.wp-frame-bar { gap: 6px; }
+.wp-frame-bar .mantine-Slider-root { flex: 1; }
+.wp-section-title { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--mantine-color-dimmed); font-weight: 700; margin: 6px 0 2px; }
+.wp-clickable { cursor: pointer; }
+.wp-table-scroll { max-height: 340px; overflow: auto; }
+.wp-formula { font-family: var(--mantine-font-family-monospace); }
+.js-plotly-plot .plotly .modebar { right: 6px !important; }
+@media (max-width: 768px) {
+  .wp-controls { height: auto; }
+  .wp-graph { height: 60vh; }
+}
