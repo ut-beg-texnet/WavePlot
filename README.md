@@ -9,13 +9,18 @@ A browser-based port and modernisation of v407: snapshots, dumps (stress tensors
 processing pipelines and the original formula language, 3-D geometry, run comparison, exports, and a
 Standard / v407 numerics switch that reproduces the original calculations exactly.
 
-```powershell
-py -3.13 -m venv waveplot_python_venv
-waveplot_python_venv\Scripts\python -m pip install --only-binary=:all: -e "waveplot_web[dev,server]" -c waveplot_web\constraints-py313.txt
-waveplot_python_venv\Scripts\waveplot serve Waveplot_exe
-```
+**Quick start** (needs Python 3.12+, ideally 3.13). Run the setup script once from the repository root.
+It detects Windows or Linux, creates the `waveplot_python_venv` virtual environment, installs everything
+and opens the app:
 
-Then open <http://localhost:8050/>. See [`waveplot_web/README.md`](waveplot_web/README.md) for the
+| | Windows | Linux / macOS |
+|---|---|---|
+| First time | `setup_waveplot_web.bat` (or double-click it) | `./setup_waveplot_web.sh` |
+| Afterwards | `start_waveplot.bat` | `./start_waveplot.sh` |
+
+Put case folders (`*.map` with their `.snp/.hst/.dmp/...` files) in `waveplot_web/input_data/`. The app
+opens at <http://localhost:8050/>. See [`waveplot_web/README.md`](waveplot_web/README.md#quick-start)
+for options, or for installing by hand. See [`waveplot_web/README.md`](waveplot_web/README.md) for the
 command-line tools, the Python API and tests, and `waveplot_web/docs/dev/` for the file formats,
 architecture and the list of v407 behaviours.
 

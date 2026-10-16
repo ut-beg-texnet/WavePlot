@@ -19,9 +19,34 @@ modernisation of the Turbo Pascal **WavePlot v407** (`../Turbo pascal version/`)
   found in the original Pascal are listed in the [repository README](../README.md#problems-found-in-the-original-pascal-waveplot-v407)
   and in detail in [`docs/dev/compat.md`](docs/dev/compat.md).
 
-## Installation
+## Quick start
 
-Python 3.12+ (tested with 3.13). From the repository root:
+Python 3.12+ (tested with 3.13). From the repository root, run the setup script once:
+
+```text
+setup_waveplot_web.bat           Windows (double-clicking it works too)
+./setup_waveplot_web.sh          Linux / macOS
+```
+
+The script works out the operating system and finds a suitable Python. It prefers 3.13, which matches the
+exact pins in `constraints-py313.txt`. It creates `waveplot_python_venv`, installs WavePlot Web with
+waitress into it, checks the result and starts the app. Running it again is safe: it reuses the venv and
+only installs what is missing. Options:
+
+```text
+--python PATH   build the venv with this interpreter      --dev        also install pytest and ruff
+--venv PATH     use another venv folder                   --recreate   delete and rebuild the venv
+--no-start      install only
+```
+
+After that, start the app with `start_waveplot.bat` or `./start_waveplot.sh`. Both serve
+`input_data/` (put case folders there) with waitress and open the browser. Any extra options go to
+`waveplot serve`, e.g. `start_waveplot.bat --port 8060` or `./start_waveplot.sh --host 0.0.0.0 --no-open`
+for a shared lab machine. Windows and WSL cannot share one venv folder; give WSL its own with `--venv`.
+
+## Manual installation
+
+From the repository root:
 
 ```powershell
 py -3.13 -m venv waveplot_python_venv
