@@ -37,3 +37,11 @@ htmlcov/
 .coverage
 *.egg-info/
 waveplot_web/.cache/
+
+# Personal notes
+EXPLANATION.md
+
+# Case files stay on disk. GitHub rejects anything over 100 MB.
+# Ignore contents, but keep input_data/ itself via .gitkeep.
+waveplot_web/input_data/*
+!waveplot_web/input_data/.gitkeep

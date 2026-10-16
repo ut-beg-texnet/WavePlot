@@ -155,9 +155,11 @@ def test_geometry_and_datasets(client, app):
     out = dash_call(client, app, "geo-3d.figure", {"store-ds.data": ds, "geo-layers.value": ["materials", "stopes",
                                                                                               "sources", "receivers"],
                                                     "geo-plane.value": "S22|ij|k=5", "geo-plane-frame.value": 1,
-                                                    "store-prefs.data": {}})
-    types = {t["type"] for t in out["response"]["geo-3d"]["figure"]["data"]}
+                                                    "geo-camera.value": "top", "store-prefs.data": {}})
+    fig = out["response"]["geo-3d"]["figure"]
+    types = {t["type"] for t in fig["data"]}
     assert {"mesh3d", "scatter3d", "surface"} <= types
+    assert fig["layout"]["scene"]["camera"]["projection"]["type"] == "orthographic"
     out = dash_call(client, app, "geo-traj.figure", {"store-ds.data": ds, "geo-traj-rec.value": "1",
                                                      "geo-traj-kind.value": "disp", "store-prefs.data": {}})
     assert len(out["response"]["geo-traj"]["figure"]["data"]) == 4

@@ -110,10 +110,7 @@ def geometry_traces(geom: Geometry | None, plane: PlaneSpec, layers: set[str], s
             x0, x1 = plane.span(st.extent, a1)
             y0, y1 = plane.span(st.extent, a2)
             col = STOPE_TYPE_COLORS.get(st.stype, colors["stope"])
-            info = (f"stope {st.stope_id} (type {st.stype})<br>i {st.extent.i1}-{st.extent.i2} "
-                    f"j {st.extent.j1}-{st.extent.j2} k {st.extent.k1}-{st.extent.k2}")
-            if "friction_deg" in st.params:
-                info += f"<br>friction {st.params['friction_deg']:.3g}°, cohesion {st.params.get('cohesion', 0):.3g} Pa"
+            info = stope_hover(st)
             px, py = _rect_path(x0, x1, y0, y1)
             traces.append(go.Scatter(x=px[:-1], y=py[:-1], mode="lines", hoverinfo="skip", showlegend=False,
                                      line=dict(color=HALO_DARK, width=6)))
@@ -121,6 +118,17 @@ def geometry_traces(geom: Geometry | None, plane: PlaneSpec, layers: set[str], s
                                      line=dict(color=col, width=3 if st.stype == 2 or x0 == x1 or y0 == y1 else 2),
                                      hoverinfo="text", text=info, showlegend=False))
     return traces
+
+
+def stope_hover(st) -> str:
+    """Hover text for a stope / fault: id, type, grid range and interface parameters."""
+    e = st.extent
+    info = f"stope {st.stope_id} (type {st.stype})<br>i {e.i1}-{e.i2} j {e.j1}-{e.j2} k {e.k1}-{e.k2}"
+    if "friction_deg" in st.params:
+        info += f"<br>friction {st.params['friction_deg']:.3g}°, cohesion {st.params.get('cohesion', 0):.3g} Pa"
+    if "kn" in st.params or "ks" in st.params:
+        info += f"<br>kn {st.params.get('kn', 0):.3g}, ks {st.params.get('ks', 0):.3g} Pa/m"
+    return info
 
 
 def _lo(ext: Extent) -> tuple[int, int, int]:

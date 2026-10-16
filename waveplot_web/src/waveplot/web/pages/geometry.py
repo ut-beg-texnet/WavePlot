@@ -19,6 +19,7 @@ from ..components import kv_table, section, simple_table
 
 LAYERS = [("materials", "Materials"), ("sources", "Sources"), ("stopes", "Stopes / faults"),
           ("receivers", "Receivers")]
+CAMERA_VIEWS = [("iso", "Iso"), ("top", "Top"), ("front", "Front (i-j)"), ("side", "Side (k-j)")]
 
 
 def layout(**_kwargs):
@@ -26,6 +27,8 @@ def layout(**_kwargs):
         section("3-D view"),
         dmc.CheckboxGroup(id="geo-layers", value=[k for k, _ in LAYERS], children=dmc.SimpleGrid(
             [dmc.Checkbox(label=lab, value=k) for k, lab in LAYERS], cols=2, spacing=4, verticalSpacing=4)),
+        dmc.SegmentedControl(id="geo-camera", data=[{"label": lab, "value": v} for v, lab in CAMERA_VIEWS],
+                             value="iso", fullWidth=True, size="xs"),
         dmc.Select(id="geo-plane", label="Show snapshot on its plane", data=[], clearable=True,
                    placeholder="none", comboboxProps={"withinPortal": True}),
         dmc.NumberInput(id="geo-plane-frame", label="Frame", value=0, min=0, w=120),
@@ -76,7 +79,8 @@ def register_callbacks(app) -> None:
         ds = state.get_dataset(ds_id)
         if ds is None:
             return [], [], None, [], no_update, no_update
-        planes = [{"value": s.slug, "label": s.label} for s in ds.series.values() if not s.is_spacetime]
+        planes = [{"value": s.slug, "label": (f"fault {s.stope_id}: " if s.stope_id is not None else "") + s.label}
+                  for s in ds.series.values() if not s.is_spacetime]
         recs = [{"value": str(r.number), "label": r.label} for r in ds.receivers if r.velocity]
         crk = [{"value": str(c.number), "label": f"crack dump #{c.number} (t = {c.time:.4g} s)"} for c in ds.cracks]
         geom = ds.geometry
@@ -88,8 +92,9 @@ def register_callbacks(app) -> None:
         return planes, recs, (recs[0]["value"] if recs else None), crk, no_update, no_update
 
     @app.callback(Output("geo-3d", "figure"), Input("store-ds", "data"), Input("geo-layers", "value"),
-                  Input("geo-plane", "value"), Input("geo-plane-frame", "value"), Input("store-prefs", "data"))
-    def _model(ds_id, layers, plane, frame, prefs):
+                  Input("geo-plane", "value"), Input("geo-plane-frame", "value"), Input("geo-camera", "value"),
+                  Input("store-prefs", "data"))
+    def _model(ds_id, layers, plane, frame, camera, prefs):
         scheme = state.scheme_of(prefs)
         ds = state.get_dataset(ds_id)
         if ds is None:
@@ -97,7 +102,7 @@ def register_callbacks(app) -> None:
         if ds.geometry is None and not ds.receivers:
             return empty_figure("This dataset has no geometry", scheme)
         s = ds.series.get(plane) if plane else None
-        return model_figure(ds, set(layers or []), scheme, s, int(frame or 0))
+        return model_figure(ds, set(layers or []), scheme, s, int(frame or 0), camera=camera or "iso")
 
     @app.callback(Output("url", "pathname", allow_duplicate=True), Output("store-nav", "data", allow_duplicate=True),
                   Input("geo-3d", "clickData"), State("store-ds", "data"), prevent_initial_call=True)
