@@ -43,14 +43,17 @@ def _v407_segments(z: np.ndarray, x: np.ndarray, y: np.ndarray, lev: float) -> t
     X, Y = np.meshgrid(x, y)                       # (ny, nx)
     # corners: index = 2*xx + yy with xx along x, yy along y
     v = [z[:-1, :-1], z[1:, :-1], z[:-1, 1:], z[1:, 1:]]
-    px = [X[:-1, :-1], X[1:, :-1], X[:-1, 1:], X[1:, 1:]]
-    py = [Y[:-1, :-1], Y[1:, :-1], Y[:-1, 1:], Y[1:, 1:]]
-    vc = (v[0] + v[1] + v[2] + v[3]) / 4
-    pxc = (px[0] + px[1] + px[2] + px[3]) / 4
-    pyc = (py[0] + py[1] + py[2] + py[3]) / 4
-    v.append(vc)
-    px.append(pxc)
-    py.append(pyc)
+    lo = np.minimum(np.minimum(v[0], v[1]), np.minimum(v[2], v[3]))
+    hi = np.maximum(np.maximum(v[0], v[1]), np.maximum(v[2], v[3]))
+    cells = np.nonzero((lo < lev) & (hi >= lev) | (lo <= lev) & (hi > lev))   # only cells the level crosses
+    if cells[0].size == 0:
+        return np.empty(0), np.empty(0)
+    v = [a[cells] for a in v]
+    px = [a[cells] for a in (X[:-1, :-1], X[1:, :-1], X[:-1, 1:], X[1:, 1:])]
+    py = [a[cells] for a in (Y[:-1, :-1], Y[1:, :-1], Y[:-1, 1:], Y[1:, 1:])]
+    v.append((v[0] + v[1] + v[2] + v[3]) / 4)
+    px.append((px[0] + px[1] + px[2] + px[3]) / 4)
+    py.append((py[0] + py[1] + py[2] + py[3]) / 4)
     segs_x, segs_y = [], []
     for a, b, c in ((0, 1, 4), (1, 3, 4), (0, 2, 4), (2, 3, 4)):
         pts_x, pts_y, hit = [], [], []
@@ -62,7 +65,7 @@ def _v407_segments(z: np.ndarray, x: np.ndarray, y: np.ndarray, lev: float) -> t
             pts_x.append(px[p] + t * (px[q] - px[p]))
             pts_y.append(py[p] + t * (py[q] - py[p]))
             hit.append(cross)
-        h = np.stack(hit)                            # (3, ny-1, nx-1)
+        h = np.stack(hit)                            # (3, ncells)
         two = h.sum(axis=0) >= 2
         if not two.any():
             continue

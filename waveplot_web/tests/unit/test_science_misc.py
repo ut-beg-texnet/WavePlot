@@ -18,6 +18,15 @@ def test_principal_2d_cases():
     assert abs(p.angle_min[0]) == pytest.approx(math.pi / 4)
     v = stress.principal_2d(np.array([-10.0]), np.array([-2.0]), np.array([0.0]), mode="v407")
     assert v.sigma_min[0] == -10
+    # the direction really is an eigenvector of σmin (rotated tensor check)
+    rng = np.random.default_rng(1)
+    for _ in range(20):
+        a, b, c = rng.normal(size=3)
+        for mode in ("standard", "v407"):
+            q = stress.principal_2d(np.array([a]), np.array([b]), np.array([c]), mode=mode)
+            d = np.array([math.cos(q.angle_min[0]), math.sin(q.angle_min[0])])
+            T = np.array([[a, c], [c, b]])
+            np.testing.assert_allclose(T @ d, q.sigma_min[0] * d, atol=1e-9)
 
 
 def test_rotation_consistency_and_v407_sign():
@@ -104,3 +113,13 @@ def test_contours_engines_agree_roughly():
         ((_lev, xs, ys),) = contour_lines(z, x, y, [0.25], engine)
         r = np.hypot(xs[np.isfinite(xs)], ys[np.isfinite(ys)])
         assert r.size > 20 and np.allclose(r, 0.5, atol=0.02)
+
+
+def test_ess_optimal_closed_form_matches_search():
+    rng = np.random.default_rng(7)
+    s11, s22, s12 = (rng.normal(size=300) * 5 - (k == 1) * 3 for k in range(3))
+    best, normal = stress.ess_optimal(s11, s22, s12, 30.0, 0.5)
+    grid = np.max([stress.ess(s11, s22, s12, th, 30.0, 0.5) for th in np.arange(0, 180, 0.05)], axis=0)
+    np.testing.assert_allclose(best, grid, atol=1e-3 * np.abs(grid).max())
+    at = np.array([float(stress.ess(s11[k], s22[k], s12[k], normal[k] - 90, 30.0, 0.5)) for k in range(300)])
+    np.testing.assert_allclose(at, best, atol=2e-3 * np.abs(grid).max())

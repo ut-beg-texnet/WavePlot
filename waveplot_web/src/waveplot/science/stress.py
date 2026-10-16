@@ -31,10 +31,13 @@ def principal_2d(s11, s22, s12, mode: Mode = "standard") -> Principal2D:
     s11, s22, s12 = (np.asarray(a, dtype=float) for a in (s11, s22, s12))
     summ, diff = s11 + s22, s11 - s22
     r = np.sqrt(s12**2 + 0.25 * diff**2)
-    if mode == "v407":   # Ang = ½·Arctan0(2·s12, −Diff): direction of the most compressive axis
-        ang = 0.5 * np.asarray(arctan0(2 * s12, -diff))
+    # Direction of the most compressive axis in the data frame (ax1 → ax2). v407 computes
+    # Ang = ½·Arctan0(2·s12, −Diff) and draws the bar at −Ang in screen coordinates, which is the
+    # same physical direction; only Arctan0's (0, 0) edge case differs.
+    if mode == "v407":
+        ang = -0.5 * np.asarray(arctan0(2 * s12, -diff))
     else:
-        ang = 0.5 * np.arctan2(2 * s12, -diff)
+        ang = 0.5 * np.arctan2(-2 * s12, -diff)
     return Principal2D(0.5 * summ + r, 0.5 * summ - r, ang)
 
 
@@ -67,17 +70,30 @@ def ess(s11, s22, s12, theta_deg: float, friction_deg: float, cohesion: float = 
     return np.abs(t12) - abs(math.tan(math.radians(friction_deg))) * np.abs(sn) - cohesion
 
 
-def ess_optimal(s11, s22, s12, friction_deg: float, cohesion: float = 0.0, step_deg: float = 1.0
-                ) -> tuple[np.ndarray, np.ndarray]:
-    """Maximum ESS over all plane orientations and the orientation (degrees) where it occurs."""
-    best = np.full(np.shape(s11), -np.inf)
-    arg = np.zeros(np.shape(s11))
-    for th in np.arange(0.0, 180.0, step_deg):
-        v = ess(s11, s22, s12, float(th), friction_deg, cohesion)
-        better = v > best
-        best = np.where(better, v, best)
-        arg = np.where(better, th, arg)
-    return best, arg
+def ess_optimal(s11, s22, s12, friction_deg: float, cohesion: float = 0.0) -> tuple[np.ndarray, np.ndarray]:
+    """Maximum ESS over all plane orientations (exact, over the Mohr circle) and the angle (degrees,
+    from ax1) of the corresponding plane normal.
+
+    Planes map to points σn = σm + R·c, |τ| = R·√(1−c²), c ∈ [−1, 1]. Where σn ≥ 0 the ESS is |τ|;
+    where σn < 0 it is |τ| + μ·σn, maximised at c* = μ/√(1+μ²) with value μ·σm + R·√(1+μ²).
+    """
+    s11, s22, s12 = (np.asarray(a, dtype=float) for a in (s11, s22, s12))
+    mu = abs(math.tan(math.radians(friction_deg)))
+    sm = 0.5 * (s11 + s22)
+    r = np.sqrt(s12**2 + 0.25 * (s11 - s22) ** 2)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        c0 = np.where(r > 0, -sm / r, np.where(sm >= 0, -np.inf, np.inf))   # σn ≥ 0 for c ≥ c0
+    cstar = mu / math.sqrt(1 + mu * mu)
+    # region σn ≥ 0 (c ≥ c0): max |τ| at c = clip(0, c0, 1)
+    ca = np.clip(np.maximum(c0, 0.0), -1.0, 1.0)
+    a_val = np.where(c0 <= 1.0, r * np.sqrt(np.maximum(1 - ca**2, 0.0)), -np.inf)
+    # region σn < 0 (c < c0): unconstrained optimum if c* < c0, otherwise the boundary (same as region A)
+    b_val = np.where(cstar < c0, mu * sm + r * math.sqrt(1 + mu * mu), -np.inf)
+    best = np.maximum(a_val, b_val)
+    c_opt = np.where(b_val >= a_val, cstar, ca)
+    p = principal_2d(s11, s22, s12)
+    normal = np.degrees(p.angle_max + 0.5 * np.arccos(np.clip(c_opt, -1, 1))) % 180
+    return best - cohesion, normal
 
 
 @dataclass
