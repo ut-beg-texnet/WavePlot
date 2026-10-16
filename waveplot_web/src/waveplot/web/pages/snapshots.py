@@ -3,6 +3,7 @@ geometry overlays, multi-panel grids, a probe inspector and exports."""
 
 from __future__ import annotations
 
+import time
 from urllib.parse import parse_qs, quote
 
 import dash_mantine_components as dmc
@@ -419,7 +420,7 @@ def register_callbacks(app) -> None:
         cd = pt.get("customdata")
         if callback_context.triggered_id == "snp-graph" and cd and isinstance(cd, list) and len(cd) > 1:
             hist = [int(h) for h in cd[1:] if h is not None]
-            return no_update, no_update, "/histories", {"open_histories": hist, "ds": ds_id}
+            return no_update, no_update, "/histories", {"open_histories": hist, "ds": ds_id, "ts": time.time()}
         a1, a2 = s.coords()
         ix, iy = a1.nearest(float(pt["x"])), a2.nearest(float(pt["y"]))
         n = int(np.clip(frame or 0, 0, len(s) - 1))

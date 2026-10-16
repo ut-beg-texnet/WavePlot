@@ -29,11 +29,11 @@ def provenance_badge(quirks: list[str], mode: str):
     from ...science.compat import QUIRKS
 
     if mode != "v407":
-        return dmc.Badge("standard numerics", color="teal", variant="light", size="sm")
+        return dmc.Badge("standard numerics", color="teal", variant="light", size="sm", tt="none")
     if not quirks:
-        return dmc.Badge("v407 mode", color="orange", variant="light", size="sm")
+        return dmc.Badge("v407 mode", color="orange", variant="light", size="sm", tt="none")
     return dmc.Tooltip(dmc.Badge(f"v407 numerics · {len(quirks)} quirk(s)", color="orange", variant="filled",
-                                 size="sm"),
+                                 size="sm", tt="none"),
                        label=html.Ul([html.Li(QUIRKS.get(q, q)) for q in quirks], style={"margin": 0,
                                                                                         "paddingLeft": 16}),
                        multiline=True, w=360, withArrow=True)
