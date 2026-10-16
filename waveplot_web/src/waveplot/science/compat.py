@@ -36,6 +36,8 @@ QUIRKS: dict[str, str] = {
     "dump_sampling": "dump glyph grid picked with ROUND((p−0.49)·ratio)",
     "index_rotation": "rotation towards a source uses grid indices instead of metres",
     "binary_right_time": "binary operations take the right operand's time base, index-wise",
+    "hist_truncate": "histories longer than 4096 samples truncated",
+    "v407_contours": "contours from the 4-triangle centre-point scheme",
 }
 
 
