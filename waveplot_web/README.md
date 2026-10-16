@@ -15,7 +15,9 @@ modernisation of the Turbo Pascal **WavePlot v407** (`../Turbo pascal version/`)
   cross-sections, particle motion, crack dumps.
 * **Compare** — two runs side by side or as differences.
 * **Standard / v407 numerics** — corrected maths by default; a switch reproduces the original
-  program's calculations (and its quirks) exactly, with a badge listing what differs.
+  program's calculations (and its quirks) exactly, with a badge listing what differs. The problems
+  found in the original Pascal are listed in the [repository README](../README.md#problems-found-in-the-original-pascal-waveplot-v407)
+  and in detail in [`docs/dev/compat.md`](docs/dev/compat.md).
 
 ## Installation
 
