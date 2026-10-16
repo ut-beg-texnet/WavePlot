@@ -24,3 +24,7 @@
 *.exe binary
 *.EXE binary
 *.nc binary
+
+# Launchers: shell scripts must keep LF, batch files CRLF
+*.sh text eol=lf
+*.bat text eol=crlf
