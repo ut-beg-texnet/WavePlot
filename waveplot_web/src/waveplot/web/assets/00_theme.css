@@ -27,3 +27,13 @@ html, body { height: 100%; }
   .wp-controls { height: auto; }
   .wp-graph { height: 60vh; }
 }
+.wp-help { max-width: 980px; line-height: 1.55; }
+.wp-help table { border-collapse: collapse; margin: 8px 0 16px; font-size: 0.86rem; }
+.wp-help th, .wp-help td { border: 1px solid var(--mantine-color-default-border); padding: 4px 8px; vertical-align: top; }
+.wp-help th { background: var(--mantine-color-default-hover); }
+.wp-help code { font-family: var(--mantine-font-family-monospace); font-size: 0.82rem;
+  background: var(--mantine-color-default-hover); padding: 0 3px; border-radius: 3px; }
+.wp-help pre { background: var(--mantine-color-default-hover); padding: 8px 10px; border-radius: 6px; overflow-x: auto; }
+.wp-help pre code { background: none; padding: 0; }
+.wp-help h1 { font-size: 1.5rem; margin-top: 0.2rem; }
+.wp-help h2 { font-size: 1.15rem; margin-top: 1.2rem; }

@@ -161,6 +161,11 @@ def register_callbacks(app) -> None:
         disabled = not disabled
         return disabled, ("▶" if disabled else "⏸")
 
+    @app.callback(Output("dmp-theta", "value"), Output("dmp-phi", "value"), Input("store-prefs", "data"))
+    def _prefs_defaults(prefs):
+        p = prefs or {}
+        return p.get("ess_theta", 0.0), p.get("ess_friction", 30.0)
+
     @app.callback(Output("dmp-vmin", "disabled"), Output("dmp-vmax", "disabled"), Output("dmp-field", "disabled"),
                   Input("dmp-range", "value"), Input("dmp-kind", "value"))
     def _enable(rng, kind):

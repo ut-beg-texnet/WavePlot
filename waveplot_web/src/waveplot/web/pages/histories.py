@@ -393,6 +393,14 @@ def register_callbacks(app) -> None:
         return fig, (dmc.Stack(cards, gap=4, mt="xs") if cards else None), provenance_badge(sorted(quirks), mode), \
             spec_fig, sg_opts, metrics
 
+    @app.callback(Output("hst-f-over", "value"), Output("hst-f-lo", "value"), Output("hst-f-hi", "value"),
+                  Output("hst-t-lo", "value"), Output("hst-t-hi", "value"), Output("hst-t-max", "value"),
+                  Input("store-prefs", "data"))
+    def _fourier_defaults(prefs):
+        f = (prefs or {}).get("fourier") or {}
+        return (f.get("oversize", 1), f.get("low_freq", 10), f.get("high_freq", 100), f.get("low_taper", 5),
+                f.get("high_taper", 95), f.get("max_taper", 5))
+
     @app.callback(Output("hst-vfix", "disabled"), Output("hst-t1", "disabled"), Output("hst-t2", "disabled"),
                   Input("hst-vlink", "value"), Input("hst-hlink", "value"))
     def _enable(vlink, hlink):

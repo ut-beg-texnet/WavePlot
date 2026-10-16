@@ -11,6 +11,7 @@ from dash import Input, Output, State, callback_context, dcc, html, no_update
 from ..config import AppConfig
 from . import state
 from .app import PAGES, mantine_theme
+from .prefs import load_preferences
 
 SHORTCUTS = [
     ("← / →", "previous / next frame (Shift: jump by N)"),
@@ -84,7 +85,7 @@ def layout(cfg: AppConfig):
         [
             dcc.Location(id="url", refresh="callback-nav"),
             dcc.Store(id="store-ds", storage_type="session", data=cfg.initial_dataset),
-            dcc.Store(id="store-prefs", storage_type="local", data={"mode": "standard", "scheme": "light"}),
+            dcc.Store(id="store-prefs", storage_type="local", data=load_preferences().model_dump()),
             dcc.Store(id="store-kbd", data=None),
             dcc.Store(id="store-nav", storage_type="session", data=None),
             dmc.NotificationContainer(id="notify", position="bottom-right"),
